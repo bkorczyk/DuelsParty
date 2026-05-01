@@ -1,0 +1,4 @@
+name: DuelsParty
+version: '1.0-SNAPSHOT'
+main: org.antix.duelsparty.DuelsPartyPlugin
+api-version: '1.21'

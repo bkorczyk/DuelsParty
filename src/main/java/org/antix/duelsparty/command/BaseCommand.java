@@ -2,7 +2,6 @@ package org.antix.duelsparty.command;
 
 import org.antix.duelsparty.DuelException;
 import org.antix.duelsparty.util.MessageService;
-import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -19,39 +18,26 @@ public abstract class BaseCommand implements CommandExecutor {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("Only players can use this command!");
+            sender.sendMessage("§cOnly players can use this command!");
             return true;
         }
 
         try {
             execute(player, args);
         } catch (DuelException e) {
-            // Pobieramy locale gracza (zwraca np. "pl_pl")
-            String fullLocale = player.getLocale().toLowerCase();
-
-            // Wyciągamy pierwsze dwa znaki (np. "pl"), żeby pasowało do naszych plików
-            String lang = fullLocale.split("_")[0];
-
-            // Wysyłamy przetłumaczony błąd
+            // Logika wyciągania języka i wysyłania błędu
+            String lang = player.getLocale().split("_")[0].toLowerCase();
             player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
+        } catch (Exception e) {
+            // Obsługa niespodziewanych błędów, żeby nie wywaliło pluginu
+            player.sendMessage("§cAn internal error occurred.");
+            e.printStackTrace();
         }
 
         return true;
     }
 
-    public void execute(Player player, String[] args) {
-        if (args.length < 1) {
-            throw new DuelException("error.usage-duel");
-        }
-
-        Player target = Bukkit.getPlayer(args[0]);
-        duelManager.sendInvite(player, target);
-
-        // Wiadomość dla wysyłającego (przetłumaczona przez BaseCommand)
-        player.sendMessage(messageService.getMessage(player.getLocale().split("_")[0], "success.invite-sent"));
-
-        // Wiadomość dla zaproszonego
-        target.sendMessage(messageService.getMessage(target.getLocale().split("_")[0], "info.invite-received")
-                .replace("{player}", player.getName()));
-    }
+    // To jest kluczowe: metoda jest abstrakcyjna i nie ma ciała!
+    // Każda komenda (Invite, Accept) wypełni ją po swojemu.
+    public abstract void execute(Player player, String[] args);
 }

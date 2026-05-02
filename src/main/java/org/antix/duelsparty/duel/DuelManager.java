@@ -5,13 +5,11 @@ import org.antix.duelsparty.duel.arena.Arena;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 public class DuelManager {
     private final List<Arena> arenas = new ArrayList<>();
+    private final Map<java.util.UUID, java.util.UUID> pendingInvites = new java.util.HashMap<>();
 
     public void addArena(Arena arena) {
         arenas.add(arena);
@@ -63,7 +61,6 @@ public class DuelManager {
     public void sendInvite(Player sender, Player target) {
         validatePlayers(sender, target);
 
-        // Sprawdzamy czy jakaś arena w ogóle jest wolna zanim wyślemy zaproszenie
         if (arenas.stream().noneMatch(a -> !a.isBusy())) {
             throw new DuelException("error.no-arenas-available");
         }
@@ -72,20 +69,18 @@ public class DuelManager {
     }
 
     public Duel acceptInvite(Player target) {
-        UUID senderUuid = pendingInvites.remove(target.getUniqueId());
+        java.util.UUID senderUuid = pendingInvites.remove(target.getUniqueId());
 
         if (senderUuid == null) {
             throw new DuelException("error.no-pending-invite");
         }
 
-        Player sender = Bukkit.getPlayer(senderUuid);
+        Player sender = org.bukkit.Bukkit.getPlayer(senderUuid);
         if (sender == null || !sender.isOnline()) {
             throw new DuelException("error.player-offline");
         }
 
-        // Dopiero teraz, po akceptacji, tworzymy realny pojedynek
         return createDuel(sender, target);
     }
-
 
 }

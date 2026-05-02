@@ -1,4 +1,15 @@
 name: DuelsParty
-version: '1.0-SNAPSHOT'
+version: 1.0
 main: org.antix.duelsparty.DuelsPartyPlugin
-api-version: '1.21'
+api-version: '1.21' # Warto trzymać w cudzysłowie dla świętego spokoju
+author: Antix
+
+commands:
+  duel:
+    description: Send a duel invite to a player.
+    usage: /duel <player>
+    permission: duelsparty.duel # Dobra praktyka: dodaj uprawnienia od razu
+  accept:
+    description: "Accept a pending duel invite."
+    usage: /accept
+    permission: duelsparty.accept

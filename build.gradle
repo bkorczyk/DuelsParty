@@ -1,6 +1,8 @@
 plugins {
     id 'java'
     id("xyz.jpenilla.run-paper") version "2.3.1"
+    id 'org.hidetake.ssh' version '2.11.2'
+
 }
 
 group = 'org.antix'
@@ -39,6 +41,7 @@ tasks {
     // Your plugin's jar (or shadowJar if present) will be used automatically.
     minecraftVersion("1.21")
   }
+
 }
 
 def targetJavaVersion = 21
@@ -56,6 +59,30 @@ tasks.withType(JavaCompile).configureEach {
 
     if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
         options.release.set(targetJavaVersion)
+    }
+}
+
+remotes {
+    minecraftServer {
+        host = '192.168.88.188'
+        user = 'minecraft'
+        // Zmieniamy id_rsa na id_ed25519
+        identity = file("${System.getProperty('user.home')}/.ssh/id_ed25519")
+    }
+}
+
+
+tasks.register('deploy') {
+    dependsOn build
+    doLast {
+        ssh.run {
+            session(remotes.minecraftServer) {
+                put from: layout.buildDirectory.file("libs/DuelsParty-1.0-SNAPSHOT.jar").get().asFile,
+                        into: '/opt/MinecraftServers/duels/plugins/'
+                // Opcjonalnie: automatyczny restart pluginu przez konsolę serwera
+                 execute 'screen -S minecraft -X stuff "plugman reload DuelsParty\n"'
+            }
+        }
     }
 }
 

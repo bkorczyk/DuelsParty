@@ -1,5 +1,6 @@
 package org.antix.duelsparty.command;
 
+import org.antix.duelsparty.duel.Duel;
 import org.antix.duelsparty.duel.DuelManager;
 import org.antix.duelsparty.util.MessageService;
 import org.bukkit.entity.Player;
@@ -14,10 +15,13 @@ public class DuelAcceptCommand extends BaseCommand {
 
     @Override
     public void execute(Player player, String[] args) {
-        // Tu wywołujemy logikę akceptacji, którą wcześniej dodaliśmy do Managera
-        duelManager.acceptInvite(player);
+        // 1. Akceptujemy i pobieramy obiekt pojedynku
+        Duel duel = duelManager.acceptInvite(player);
 
-        // Pobieramy język gracza do komunikatu o sukcesie
+        // 2. Odpalamy walkę!
+        duel.start();
+
+        // 3. Opcjonalnie: Komunikat dla serwera
         String lang = player.getLocale().split("_")[0];
         player.sendMessage(messageService.getMessage(lang, "success.duel-started"));
     }

@@ -1,30 +1,43 @@
 package org.antix.duelsparty.util;
 
 import org.bukkit.ChatColor;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 
 public class MessageService {
-    private final Map<String, Map<String, String>> translations = new HashMap<>();
-    private static final String DEFAULT_LANG = "en";
+    private final JavaPlugin plugin;
+    private final Map<String, FileConfiguration> configs = new HashMap<>();
+    private final String defaultLang = "en";
 
-    public void loadLanguage(String lang, Map<String, String> messages) {
-        translations.put(lang, messages);
+    public MessageService(JavaPlugin plugin) {
+        this.plugin = plugin;
+        loadLanguage("en");
+        loadLanguage("pl");
+    }
+
+    public void loadLanguage(String lang) {
+        File file = new File(plugin.getDataFolder(), "messages_" + lang + ".yml");
+        if (!file.exists()) {
+            plugin.saveResource("messages_" + lang + ".yml", false);
+        }
+        configs.put(lang, YamlConfiguration.loadConfiguration(file));
     }
 
     public String getMessage(String lang, String key) {
-        // 1. Szukaj w wybranym języku
-        String message = translations.getOrDefault(lang, new HashMap<>()).get(key);
+        // Próba pobrania wiadomości w języku gracza, fallback do angielskiego
+        FileConfiguration config = configs.getOrDefault(lang, configs.get(defaultLang));
+        String message = config.getString("messages." + key);
 
-        // 2. Fallback do angielskiego, jeśli nie znaleziono
-        if (message == null && !lang.equals(DEFAULT_LANG)) {
-            message = translations.getOrDefault(DEFAULT_LANG, new HashMap<>()).get(key);
+        if (message == null && !lang.equals(defaultLang)) {
+            message = configs.get(defaultLang).getString("messages." + key);
         }
 
-        // 3. Ostateczny fallback, jeśli klucza nigdzie nie ma
-        if (message == null) {
-            return ChatColor.RED + "Missing key: " + key;
-        }
+        if (message == null) return ChatColor.RED + "Missing key: " + key;
 
         return ChatColor.translateAlternateColorCodes('&', message);
     }

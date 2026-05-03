@@ -1,9 +1,25 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        maven { url "https://plugins.gradle.org/m2/" }
+    }
+    dependencies {
+        // Wymuszamy nowszą wersję Shadow, która wspiera Javę 21
+        classpath "com.github.johnrengelman:shadow:8.1.1"
+        // Kluczowe: Nadpisujemy ASM dla ShadowJar, aby rozumiał Javę 21
+        classpath "org.ow2.asm:asm:9.6"
+        classpath "org.ow2.asm:asm-commons:9.6"
+    }
+}
+
 plugins {
     id 'java'
-    id("xyz.jpenilla.run-paper") version "2.3.1"
+    id "xyz.jpenilla.run-paper" version "2.3.1"
     id 'org.hidetake.ssh' version '2.11.2'
-
 }
+
+// Stosujemy plugin tradycyjnie, skoro shadowJar w sekcji plugins sprawiał problemy
+apply plugin: 'com.github.johnrengelman.shadow'
 
 group = 'org.antix'
 version = '1.0-SNAPSHOT'
@@ -17,80 +33,72 @@ repositories {
 }
 
 dependencies {
-    // API Papera (już masz)
+    // Paper API
     compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
-    testImplementation("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
 
-    // JUnit 5 - Silnik testowy
+    // HikariCP i Sterownik MySQL (muszą być implementation, żeby trafiły do shadowJar)
+    implementation "com.zaxxer:HikariCP:6.0.0"
+    implementation "com.mysql:mysql-connector-j:9.1.0"
+
+    // Testy
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-
-    // Mockito - Do tworzenia "sztucznych" graczy i światów
     testImplementation("org.mockito:mockito-core:5.11.0")
     testImplementation("org.mockito:mockito-junit-jupiter:5.11.0")
 }
 
-test {
-    useJUnitPlatform() // Informujemy Gradle, że ma używać JUnit 5
+shadowJar {
+    // Relokacja bibliotek (kluczowe, by uniknąć konfliktów na serwerze)
+    relocate 'com.zaxxer.hikari', 'org.antix.duelsparty.libs.hikari'
+    relocate 'com.mysql', 'org.antix.duelsparty.libs.mysql'
+    relocate 'org.slf4j', 'org.antix.duelsparty.libs.slf4j'
+
+    exclude 'META-INF/maven/**'
+    exclude 'META-INF/upgrade/**'
+
+    archiveClassifier.set('')
+    archiveFileName = "DuelsParty-${version}.jar"
 }
+
+// Wyłączamy zwykłego jara, używamy tylko shadowJar
+jar.enabled = false
+assemble.dependsOn shadowJar
 
 tasks {
-  runServer {
-    // Configure the Minecraft version for our task.
-    // This is the only required configuration besides applying the plugin.
-    // Your plugin's jar (or shadowJar if present) will be used automatically.
-    minecraftVersion("1.21")
-  }
-
+    runServer {
+        minecraftVersion("1.21.1")
+    }
 }
 
+// Konfiguracja Javy 21
 def targetJavaVersion = 21
 java {
-    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
-    sourceCompatibility = javaVersion
-    targetCompatibility = javaVersion
-    if (JavaVersion.current() < javaVersion) {
-        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-    }
+    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
 }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-
-    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
-        options.release.set(targetJavaVersion)
-    }
+    options.release.set(targetJavaVersion)
 }
 
+// Sekcja SSH i Deploy bez zmian
 remotes {
     minecraftServer {
         host = '192.168.88.188'
         user = 'minecraft'
-        // Zmieniamy id_rsa na id_ed25519
         identity = file("${System.getProperty('user.home')}/.ssh/id_ed25519")
     }
 }
 
-
 tasks.register('deploy') {
-    dependsOn build
+    dependsOn shadowJar
     doLast {
         ssh.run {
             session(remotes.minecraftServer) {
-                put from: layout.buildDirectory.file("libs/DuelsParty-1.0-SNAPSHOT.jar").get().asFile,
-                        into: '/opt/MinecraftServers/duels/plugins/'
-                // Opcjonalnie: automatyczny restart pluginu przez konsolę serwera
-                 execute 'screen -S minecraft -X stuff "plugman reload DuelsParty\n"'
+                def jarFile = layout.buildDirectory.file("libs/DuelsParty-${version}.jar").get().asFile
+                put from: jarFile, into: '/opt/MinecraftServers/duels/plugins/'
+                execute 'screen -S minecraft -X stuff "plugman reload DuelsParty\n"'
             }
         }
-    }
-}
-
-processResources {
-    def props = [version: version]
-    inputs.properties props
-    filteringCharset 'UTF-8'
-    filesMatching('plugin.yml') {
-        expand props
     }
 }

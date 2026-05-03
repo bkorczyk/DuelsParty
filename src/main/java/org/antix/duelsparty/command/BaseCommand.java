@@ -22,16 +22,14 @@ public abstract class BaseCommand implements CommandExecutor {
             return true;
         }
 
+    // Wyciągamy język raz tutaj
+        String lang = player.getLocale().split("_")[0].toLowerCase();
+
         try {
-            execute(player, args);
+            // PRZEKAZUJEMY lang jako trzeci argument!
+            execute(player, args, lang);
         } catch (DuelException e) {
-            // Logika wyciągania języka i wysyłania błędu
-            String lang = player.getLocale().split("_")[0].toLowerCase();
             player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
-        } catch (Exception e) {
-            // Obsługa niespodziewanych błędów, żeby nie wywaliło pluginu
-            player.sendMessage("§cAn internal error occurred.");
-            e.printStackTrace();
         }
 
         return true;
@@ -39,5 +37,5 @@ public abstract class BaseCommand implements CommandExecutor {
 
     // To jest kluczowe: metoda jest abstrakcyjna i nie ma ciała!
     // Każda komenda (Invite, Accept) wypełni ją po swojemu.
-    public abstract void execute(Player player, String[] args);
+    public abstract void execute(Player player, String[] args, String lang);
 }

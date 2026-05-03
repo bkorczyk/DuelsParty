@@ -16,7 +16,14 @@ public class DuelInviteCommand extends BaseCommand {
     }
 
     @Override
-    public void execute(Player player, String[] args) {
+    public void execute(Player player, String[] args, String lang){
+        // Pobieramy język gracza (np. "pl_pl" -> "pl")
+
+        if (args.length < 1) {
+            player.sendMessage(messageService.getMessage(lang, "error.usage-duel"));
+            return;
+        }
+
         if (args.length < 1) {
             throw new DuelException("error.usage-duel");
         }
@@ -34,11 +41,18 @@ public class DuelInviteCommand extends BaseCommand {
                     .orElseThrow(() -> new DuelException("error.arena-not-found"));
         }
 
-        // Teraz przekazujemy 3 argumenty: sender, target i arena (może być null)
-        duelManager.sendInvite(player, target, requestedArena);
+// ... po walidacji targeta i areny ...
+
+        String kitId = "default"; // Domyślnie
+        if (args.length >= 3) { // Jeśli gracz wpisał /duel <nick> <arena> <kit>
+            kitId = args[2];
+        }
+
+// Wywołujemy zaktualizowaną metodę sendInvite
+        duelManager.sendInvite(player, target, requestedArena, kitId);
 
         // Wiadomości do graczy
-        String lang = player.getLocale().split("_")[0];
+
         player.sendMessage(messageService.getMessage(lang, "success.invite-sent"));
 
         String targetLang = target.getLocale().split("_")[0];

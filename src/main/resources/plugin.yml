@@ -13,3 +13,11 @@ commands:
     description: "Accept a pending duel invite."
     usage: /accept
     permission: duelsparty.accept
+  dueladmin:
+    description: "Zarządzanie arenami"
+    aliases: [da]
+    permission: duelsparty.admin
+  duelstats:
+    description: "Sprawdź swoje statystyki"
+    aliases: [ stats, statystyki ]
+    permission: duelsparty.stats

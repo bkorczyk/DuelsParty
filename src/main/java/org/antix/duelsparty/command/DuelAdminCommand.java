@@ -12,11 +12,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-public class DuelsAdminCommand implements CommandExecutor {
+public class DuelAdminCommand implements CommandExecutor {
     private final Map<String, SubCommand> adminSubCommands = new HashMap<>();
     private final MessageService messageService;
 
-    public DuelsAdminCommand(DuelManager duelManager, MessageService messageService) {
+    public DuelAdminCommand(DuelManager duelManager, MessageService messageService) {
         this.messageService = messageService;
 
         // Rejestracja modułów administracyjnych

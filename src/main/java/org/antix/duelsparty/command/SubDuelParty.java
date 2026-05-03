@@ -26,10 +26,7 @@ public class SubDuelParty implements SubCommand {
 
     @Override
     public void execute(Player player, String[] args, String lang) {
-
-
-
-        if (args.length < 2) {
+    if (args.length < 2) {
             player.sendMessage(messageService.getMessage(lang, "error.usage-party"));
             return;
         }
@@ -64,7 +61,6 @@ public class SubDuelParty implements SubCommand {
 
     private void handleCreate(Player player, String[] args, String lang) {
         if (args.length < 3) throw new DuelException("error.usage-party-create");
-
         String partyName = args[2];
         Party party = partyManager.createParty(player, partyName);
 

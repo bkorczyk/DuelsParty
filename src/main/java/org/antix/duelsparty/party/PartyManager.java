@@ -7,13 +7,17 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class PartyManager {
-    // Kto jest w jakim party
+    private final DuelsPartyPlugin plugin;
     private final Map<UUID, Party> playerPartyMap = new ConcurrentHashMap<>();
     // Nazwy zajęte w RAM
     private final Set<String> activePartyNames = Collections.newSetFromMap(new ConcurrentHashMap<>());
     // Zaproszenia: TargetUUID -> SenderUUID
     private final Map<UUID, UUID> partyInvites = new ConcurrentHashMap<>();
     private final Map<UUID, Long> inviteTimestamp = new ConcurrentHashMap<>();
+
+    public PartyManager(DuelsPartyPlugin plugin) {
+        this.plugin = plugin;
+    }
 
     public Party createParty(Player leader, String name) {
         // Walidacja nazwy

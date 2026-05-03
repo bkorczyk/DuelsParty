@@ -1,10 +1,9 @@
 package org.antix.duelsparty.duel;
 
 import org.antix.duelsparty.DuelsPartyPlugin;
-import org.antix.duelsparty.command.DuelsAdminCommand;
+import org.antix.duelsparty.command.DuelAdminCommand;
 import org.antix.duelsparty.duel.match.MatchState;
 import org.antix.duelsparty.util.MessageService;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -122,7 +121,7 @@ public class DuelListener implements Listener {
         DuelsPartyPlugin plugin = DuelsPartyPlugin.getInstance();
 
         // Pobieramy główny dispatcher administracyjny
-        if (plugin.getCommand("dueladmin").getExecutor() instanceof DuelsAdminCommand adminCmd) {
+        if (plugin.getCommand("dueladmin").getExecutor() instanceof DuelAdminCommand adminCmd) {
             // Wywołujemy metodę czyszczącą w dispatcherze
             adminCmd.clearAllPendingSessions(uuid);
 
@@ -141,7 +140,7 @@ public class DuelListener implements Listener {
 
         // 2. Obsługa sesji admina - POPRAWIONY IF
         org.bukkit.command.PluginCommand cmd = DuelsPartyPlugin.getInstance().getCommand("dueladmin");
-        if (cmd != null && cmd.getExecutor() instanceof DuelsAdminCommand adminCmd) {
+        if (cmd != null && cmd.getExecutor() instanceof DuelAdminCommand adminCmd) {
             adminCmd.clearAllPendingSessions(uuid);
             DuelsPartyPlugin.debug("Wyczyszczono sesje administracyjne dla: " + player.getName());
         }

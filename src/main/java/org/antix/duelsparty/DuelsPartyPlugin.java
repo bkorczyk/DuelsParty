@@ -26,15 +26,12 @@ public final class DuelsPartyPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         instance = this;
-        saveDefaultConfig();
 
-        // NAJPIERW baza danych i wiadomości
         setupDatabase();
         this.messageService = new MessageService(this);
-        this.partyManager = new PartyManager();
-
-        // POTEM reszta managerów
+        this.partyManager = new PartyManager(this);
         this.kitManager = new KitManager(this);
+
         this.kitManager.loadKits();
         this.duelManager = new DuelManager(kitManager);
 
@@ -43,50 +40,34 @@ public final class DuelsPartyPlugin extends JavaPlugin {
             duelCmd.setTabCompleter(new DuelTabCompleter());
         }
 
-// 2. Potem DuelManager z wstrzykniętym kitManagerem
-        this.duelManager = new DuelManager(kitManager);
-        instance = this;
-        saveDefaultConfig();
-// 2. Zainicjalizuj tutaj, przekazując "this" jako JavaPlugin
-        this.messageService = new MessageService(this);
-
-        saveDefaultConfig();
         duelManager.loadArenas(getConfig());
 
-        // Ważne: najpierw inicjalizujemy messageService, potem rejestrujemy komendy,
-        // bo komendy go potrzebują!
         registerCommands();
-
         getServer().getPluginManager().registerEvents(new DuelListener(duelManager, messageService), this);
         showWelcomeMessage();
+        saveDefaultConfig();
     }
 
     @Override
     public void onDisable() {
-        // Zapisywanie aren przy wyłączaniu
         getLogger().info("Zapisywanie aren...");
         duelManager.saveArenas(getConfig());
         saveConfig();
     }
 
     private void registerCommands() {
-        // 1. Inicjalizacja Głównego Dispatchera dla Graczy (/duel)
         DuelCommand duelCommand = new DuelCommand(duelManager, messageService);
         registerCommand("duel", duelCommand);
 
-        // Podpinamy inteligentny TabCompleter, który obsłuży zarówno nicki, jak i subkomendy
         if (getCommand("duel") != null) {
             getCommand("duel").setTabCompleter(new DuelTabCompleter());
         }
 
-        // 2. Inicjalizacja Głównego Dispatchera dla Administracji (/duelsadmin)
-        // Tworzymy go w podobny sposób jak DuelCommand, wstrzykując managerów
-        DuelsAdminCommand adminCommand = new DuelsAdminCommand(duelManager, messageService);
+        DuelAdminCommand adminCommand = new DuelAdminCommand(duelManager, messageService);
         registerCommand("dueladmin", adminCommand);
 
-        // Używamy ujednoliconego TabCompletera dla admina
         if (getCommand("dueladmin") != null) {
-            getCommand("dueladmin").setTabCompleter(new ArenaAdminTabCompleter());
+            getCommand("dueladmin").setTabCompleter(new DuelAdminTabCompleter());
         }
     }
 
@@ -95,7 +76,6 @@ public final class DuelsPartyPlugin extends JavaPlugin {
         if (command != null) {
             command.setExecutor(executor);
         } else {
-            // Twoja metoda pomocnicza teraz pilnuje porządku dla KAŻDEJ komendy
             getLogger().severe("Błąd! Komenda /" + name + " nie została znaleziona w plugin.yml!");
         }
     }
@@ -111,7 +91,6 @@ public final class DuelsPartyPlugin extends JavaPlugin {
             instance.getLogger().info("[DEBUG] " + message);
         }
     }
-    // Metoda statyczna, której szuka IDE
     public static DuelsPartyPlugin getInstance() {
         return instance;
     }

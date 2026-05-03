@@ -1,9 +1,9 @@
 package org.antix.duelsparty.duel;
 
 import org.antix.duelsparty.DuelsPartyPlugin;
+import org.antix.duelsparty.command.DuelsAdminCommand;
 import org.antix.duelsparty.duel.match.MatchState;
 import org.antix.duelsparty.util.MessageService;
-import org.antix.duelsparty.command.ArenaAdminCommand;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -15,7 +15,6 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 
-import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
@@ -28,18 +27,6 @@ public class DuelListener implements Listener {
     public DuelListener(DuelManager duelManager, MessageService messageService) {
         this.duelManager = duelManager;
         this.messageService = messageService;
-    }
-
-    @EventHandler
-    public void onDamage(EntityDamageByEntityEvent event) {
-        if (!(event.getDamager() instanceof Player attacker) || !(event.getEntity() instanceof Player victim)) return;
-
-        duelManager.getDuelByPlayer(attacker).ifPresent(duel -> {
-            // Blokujemy obrażenia w fazie odliczania
-            if (duel.getState() == MatchState.STARTING) {
-                event.setCancelled(true);
-            }
-        });
     }
 
     @EventHandler
@@ -132,12 +119,61 @@ public class DuelListener implements Listener {
     @EventHandler
     public void onAdminQuit(PlayerQuitEvent event) {
         UUID uuid = event.getPlayer().getUniqueId();
+        DuelsPartyPlugin plugin = DuelsPartyPlugin.getInstance();
 
-        // Pobieramy komendę z Bukkit, jeśli jest zarejestrowana, i czyścimy dane
-        org.bukkit.command.PluginCommand cmd = Bukkit.getPluginCommand("dueladmin");
-        if (cmd != null && cmd.getExecutor() instanceof ArenaAdminCommand adminCmd) {
-            adminCmd.clearPendingSession(uuid);
-            DuelsPartyPlugin.debug("Wyczyszczono sesję tworzenia areny dla: " + event.getPlayer().getName());
+        // Pobieramy główny dispatcher administracyjny
+        if (plugin.getCommand("dueladmin").getExecutor() instanceof DuelsAdminCommand adminCmd) {
+            // Wywołujemy metodę czyszczącą w dispatcherze
+            adminCmd.clearAllPendingSessions(uuid);
+
+            if (DuelsPartyPlugin.getInstance().getConfig().getBoolean("debug")) {
+                DuelsPartyPlugin.debug("Wyczyszczono sesje administracyjne dla: " + event.getPlayer().getName());
+            }
         }
+    }
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
+
+        // 1. Obsługa Party - usunięcie gracza z grupy przy wyjściu (Safety First)
+        DuelsPartyPlugin.getInstance().getPartyManager().leaveParty(player);
+
+        // 2. Obsługa sesji admina - POPRAWIONY IF
+        org.bukkit.command.PluginCommand cmd = DuelsPartyPlugin.getInstance().getCommand("dueladmin");
+        if (cmd != null && cmd.getExecutor() instanceof DuelsAdminCommand adminCmd) {
+            adminCmd.clearAllPendingSessions(uuid);
+            DuelsPartyPlugin.debug("Wyczyszczono sesje administracyjne dla: " + player.getName());
+        }
+    }
+    @EventHandler
+    public void onDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player attacker) || !(event.getEntity() instanceof Player victim)) return;
+
+        // Sprawdzenie Friendly Fire w Party[cite: 1]
+        var partyManager = DuelsPartyPlugin.getInstance().getPartyManager();
+        var attackerParty = partyManager.getParty(attacker);
+        var victimParty = partyManager.getParty(victim);
+
+        if (attackerParty.isPresent() && victimParty.isPresent()) {
+            if (attackerParty.get().equals(victimParty.get())) {
+                // Jeśli są w tym samym party, sprawdzamy czy trwa walka FFA[cite: 1]
+                var duel = DuelsPartyPlugin.getInstance().getDuelManager().getDuelByPlayer(attacker);
+
+                // Jeśli nie ma pojedynku LUB jest faza odliczania - blokujemy FF[cite: 1]
+                if (duel.isEmpty() || duel.get().getState() == MatchState.STARTING) {
+                    event.setCancelled(true);
+                    return;
+                }
+                // Tu można dodać: if (duel.getType() != DuelType.PARTY_FFA) event.setCancelled(true);
+            }
+        }
+
+        // Istniejąca logika blokady obrażeń w fazie STARTING dla graczy spoza tego samego party[cite: 1]
+        DuelsPartyPlugin.getInstance().getDuelManager().getDuelByPlayer(attacker).ifPresent(duel -> {
+            if (duel.getState() == MatchState.STARTING) {
+                event.setCancelled(true);
+            }
+        });
     }
 }

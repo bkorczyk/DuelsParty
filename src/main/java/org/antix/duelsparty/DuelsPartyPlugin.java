@@ -18,15 +18,25 @@ public final class DuelsPartyPlugin extends JavaPlugin {
     private DuelManager duelManager;
     private KitManager kitManager;
     private MessageService messageService;
-    private final PartyManager partyManager = new PartyManager();
+    private PartyManager partyManager;
     private static DuelsPartyPlugin instance;
     private DatabaseService databaseService;
 
+
     @Override
     public void onEnable() {
-        // 1. Najpierw KitManager
+        instance = this;
+        saveDefaultConfig();
+
+        // NAJPIERW baza danych i wiadomości
+        setupDatabase();
+        this.messageService = new MessageService(this);
+        this.partyManager = new PartyManager();
+
+        // POTEM reszta managerów
         this.kitManager = new KitManager(this);
         this.kitManager.loadKits();
+        this.duelManager = new DuelManager(kitManager);
 
         PluginCommand duelCmd = getCommand("duel");
         if (duelCmd != null) {
@@ -60,23 +70,24 @@ public final class DuelsPartyPlugin extends JavaPlugin {
     }
 
     private void registerCommands() {
+        // 1. Inicjalizacja Głównego Dispatchera dla Graczy (/duel)
+        DuelCommand duelCommand = new DuelCommand(duelManager, messageService);
+        registerCommand("duel", duelCommand);
 
-        // Rejestracja /duel
-        DuelInviteCommand duelInvite = new DuelInviteCommand(duelManager, messageService);
-        registerCommand("duel", duelInvite);
-        getCommand("duel").setTabCompleter(new DuelTabCompleter());
+        // Podpinamy inteligentny TabCompleter, który obsłuży zarówno nicki, jak i subkomendy
+        if (getCommand("duel") != null) {
+            getCommand("duel").setTabCompleter(new DuelTabCompleter());
+        }
 
-        // Rejestracja /dueladmin
-        ArenaAdminCommand arenaAdmin = new ArenaAdminCommand(duelManager);
-        registerCommand("dueladmin", arenaAdmin);
-        getCommand("dueladmin").setTabCompleter(new ArenaAdminTabCompleter());
+        // 2. Inicjalizacja Głównego Dispatchera dla Administracji (/duelsadmin)
+        // Tworzymy go w podobny sposób jak DuelCommand, wstrzykując managerów
+        DuelsAdminCommand adminCommand = new DuelsAdminCommand(duelManager, messageService);
+        registerCommand("dueladmin", adminCommand);
 
-        // Wszystkie komendy teraz używają tej samej, bezpiecznej metody
-        registerCommand("duel", new DuelInviteCommand(duelManager, messageService));
-        registerCommand("accept", new DuelAcceptCommand(duelManager, messageService));
-        registerCommand("dueladmin", new ArenaAdminCommand(duelManager));
-        registerCommand("duelstats", new DuelStatsCommand(messageService));
-
+        // Używamy ujednoliconego TabCompletera dla admina
+        if (getCommand("dueladmin") != null) {
+            getCommand("dueladmin").setTabCompleter(new ArenaAdminTabCompleter());
+        }
     }
 
     private void registerCommand(String name, org.bukkit.command.CommandExecutor executor) {
@@ -123,4 +134,8 @@ public final class DuelsPartyPlugin extends JavaPlugin {
             getLogger().info("Baza danych jest wyłączona. Statystyki nie będą zapisywane.");
         }
     }
+    public DatabaseService getDatabaseService(){
+        return databaseService;
+    }
+    public PartyManager getPartyManager(){return partyManager;}
 }

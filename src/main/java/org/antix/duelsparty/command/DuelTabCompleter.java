@@ -10,43 +10,56 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
 public class DuelTabCompleter implements TabCompleter {
 
+    private static final List<String> SUB_COMMANDS = Arrays.asList("accept", "deny", "stats", "party");
+
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
-        List<String> completions = new ArrayList<>();
+        String current = args[args.length - 1].toLowerCase();
 
+        // 1. Podpowiedzi dla pierwszego argumentu: Nicki LUB Sub-komendy
         if (args.length == 1) {
-            // Podpowiadaj graczy online (z wyłączeniem siebie)
-            String current = args[0].toLowerCase();
-            return Bukkit.getOnlinePlayers().stream()
-                    .map(Player::getName)
-                    .filter(name -> name.toLowerCase().startsWith(current))
-                    .filter(name -> !name.equals(sender.getName()))
-                    .collect(Collectors.toList());
+            List<String> suggestions = new ArrayList<>(SUB_COMMANDS);
+
+            // Dodajemy graczy online (z pominięciem wysyłającego)
+            Bukkit.getOnlinePlayers().forEach(p -> {
+                if (!p.getName().equalsIgnoreCase(sender.getName())) {
+                    suggestions.add(p.getName());
+                }
+            });
+
+            return filter(suggestions, current);
         }
 
-        if (args.length == 2) {
-            // Podpowiadaj areny
-            String current = args[1].toLowerCase();
-            // Uwaga: Zakładam, że masz metodę getArenas() lub podobną w DuelManager
-            // Jeśli nie, musimy ją dodać do DuelManager
-            return DuelsPartyPlugin.getInstance().getDuelManager().getArenaNames().stream()
-                    .filter(name -> name.toLowerCase().startsWith(current))
-                    .collect(Collectors.toList());
+
+        if (!SUB_COMMANDS.contains(args[0].toLowerCase())) {
+
+
+            if (args.length == 2) {
+                return filter(DuelsPartyPlugin.getInstance().getDuelManager().getArenaNames(), current);
+            }
+
+            if (args.length == 3) {
+                return filter(DuelsPartyPlugin.getInstance().getKitManager().getKitNames().stream().toList(), current);
+            }
         }
 
-        if (args.length == 3) {
-            // Podpowiadaj kity
-            String current = args[2].toLowerCase();
-            return DuelsPartyPlugin.getInstance().getKitManager().getKitNames().stream()
-                    .filter(name -> name.toLowerCase().startsWith(current))
-                    .collect(Collectors.toList());
+        // 3. Obsługa sub-komendy party (KROK 2 - szkielet)
+        if (args[0].equalsIgnoreCase("party") && args.length == 2) {
+            return filter(Arrays.asList("invite", "join", "leave", "kick"), current);
         }
 
-        return completions;
+        return new ArrayList<>();
+    }
+
+    private List<String> filter(List<String> list, String current) {
+        return list.stream()
+                .filter(s -> s.toLowerCase().startsWith(current))
+                .collect(Collectors.toList());
     }
 }

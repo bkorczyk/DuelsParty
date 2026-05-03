@@ -6,6 +6,7 @@ import org.antix.duelsparty.DuelsPartyPlugin;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -77,12 +78,37 @@ public class MySQLDatabase implements DatabaseService {
         }
     }
 
+    // W klasie MySQLDatabase.java
     @Override
     public CompletableFuture<UserStats> loadStats(UUID uuid) {
         return CompletableFuture.supplyAsync(() -> {
-            // Logika SELECT...
+            String sql = "SELECT * FROM produels_stats WHERE uuid = ?";
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+                stmt.setString(1, uuid.toString());
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return new UserStats(
+                                uuid,
+                                rs.getInt("wins"),
+                                rs.getInt("losses"),
+                                rs.getInt("kills"),
+                                rs.getInt("deaths"),
+                                calculateAccuracy(rs.getInt("kills"), rs.getInt("deaths")) // Uproszczenie
+                        );
+                    }
+                }
+            } catch (SQLException e) {
+                DuelsPartyPlugin.getInstance().getLogger().severe("Błąd podczas ładowania statystyk: " + e.getMessage());
+            }
             return new UserStats(uuid, 0, 0, 0, 0, 0.0);
         });
+    }
+
+    private double calculateAccuracy(int wins, int losses) {
+        int total = wins + losses;
+        return total == 0 ? 0.0 : (double) wins / total * 100.0;
     }
 
     @Override

@@ -1,23 +1,27 @@
 name: DuelsParty
 version: 1.0
 main: org.antix.duelsparty.DuelsPartyPlugin
-api-version: '1.21' # Warto trzymać w cudzysłowie dla świętego spokoju
+api-version: '1.21'
 author: Antix
+# Dodajemy opcjonalne, ale profesjonalne pola
+description: "Zaawansowany system pojedynków 1v1 oraz Party z integracją MySQL."
+website: https://github.com/antix/duelsparty
 
 commands:
   duel:
-    description: Send a duel invite to a player.
-    usage: /duel <player>
-    permission: duelsparty.duel # Dobra praktyka: dodaj uprawnienia od razu
-  accept:
-    description: "Accept a pending duel invite."
-    usage: /accept
-    permission: duelsparty.accept
+    description: "Główna komenda gracza (wyzwania, akceptacja, statystyki, grupy)"
+    aliases: [d]
+    permission: duelsparty.user
+    # Nie definiujemy 'usage', ponieważ Dispatcher sam wysyła pomoc zależną od języka
   dueladmin:
-    description: "Zarządzanie arenami"
-    aliases: [da]
+    description: "Centrum zarządzania pluginem (arenami, zestawami, konfiguracją)"
+    aliases: [da, pduel]
     permission: duelsparty.admin
-  duelstats:
-    description: "Sprawdź swoje statystyki"
-    aliases: [ stats, statystyki ]
-    permission: duelsparty.stats
+
+permissions:
+  duelsparty.user:
+    description: "Dostęp do podstawowych funkcji pojedynków"
+    default: true
+  duelsparty.admin:
+    description: "Pełny dostęp do konfiguracji aren i zestawów"
+    default: op

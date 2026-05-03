@@ -1,459 +1,105 @@
 find src/main -name "*.java" -o -name "*.yml" | xargs -I {} sh -c 'echo "--- FILE: {} ---"; cat {}; echo ""' > projekt.txt
 
---- FILE: src/main/java/org/antix/duelsparty/command/ArenaAdminCommand.java ---
-package org.antix.duelsparty.command;
-
-import org.antix.duelsparty.duel.DuelManager;
-import org.antix.duelsparty.util.ArenaLocation;
-import org.antix.duelsparty.duel.arena.Arena;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
-import org.jetbrains.annotations.NotNull;
-
-import java.util.HashMap;
-import java.util.Map;
-
-public class ArenaAdminCommand implements CommandExecutor {
-    private final DuelManager duelManager;
-
-    // Mapa przechowująca pierwszy punkt spawnu do czasu ustawienia drugiego
-    private final Map<Player, ArenaLocation> pendingSpawn1 = new HashMap<>();
-
-    public ArenaAdminCommand(DuelManager duelManager) {
-        this.duelManager = duelManager;
-    }
-
-    @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage("Ta komenda jest tylko dla graczy!");
-            return true;
-        }
-
-        if (args.length < 2) {
-            player.sendMessage("§6§l» §cPoprawne użycie: §f/da <set1|set2> <nazwa>");
-            return true;
-        }
-
-        String action = args[0].toLowerCase();
-        String arenaName = args[1];
-
-        switch (action) {
-            case "set1" -> {
-                // Konwertujemy obecną lokację gracza na nasz lekki format
-                ArenaLocation loc1 = ArenaLocation.fromLocation(player.getLocation());
-                pendingSpawn1.put(player, loc1);
-                player.sendMessage("§6§l» §aPomyślnie ustawiono §fSpawn 1 §adla areny §f" + arenaName + "§a.");
-                player.sendMessage("§7Teraz udaj się na drugie miejsce i wpisz: §f/da set2 " + arenaName);
-            }
-            case "set2" -> {
-                // Sprawdzamy, czy gracz najpierw ustawił punkt pierwszy
-                if (!pendingSpawn1.containsKey(player)) {
-                    player.sendMessage("§6§l» §cBłąd! Musisz najpierw ustawić pierwszy punkt: §f/da set1 " + arenaName);
-                    return true;
-                }
-
-                // Pobieramy zapamiętany s1 i obecną lokację jako s2
-                ArenaLocation s1 = pendingSpawn1.remove(player);
-                ArenaLocation s2 = ArenaLocation.fromLocation(player.getLocation());
-
-                // Tworzymy arenę i dodajemy do managera
-                Arena newArena = new Arena(arenaName, s1, s2);
-                duelManager.addArena(newArena);
-
-                player.sendMessage("§6§l» §6Arena §f" + arenaName + " §6została poprawnie utworzona!");
-                player.sendMessage("§7Możesz teraz wyzwać gracza wpisując: §f/duel <nick> " + arenaName);
-            }
-            default -> player.sendMessage("§6§l» §cNieznana akcja! Użyj §fset1 §club §fset2§c.");
-        }
-
-        return true;
-    }
-}
---- FILE: src/main/java/org/antix/duelsparty/command/KitAdminCommand.java ---
-package org.antix.duelsparty.command;
+--- FILE: src/main/java/org/antix/duelsparty/duel/kit/KitManager.java ---
+package org.antix.duelsparty.duel.kit;
 
 import org.antix.duelsparty.DuelsPartyPlugin;
-import org.antix.duelsparty.util.MessageService;
+import org.bukkit.Material;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
+
 import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
-public class KitAdminCommand extends BaseCommand {
-    public KitAdminCommand(MessageService messageService) {
-        super(messageService);
+public class KitManager {
+    private final DuelsPartyPlugin plugin;
+    private final Map<String, Kit> kits = new ConcurrentHashMap<>();
+
+    public KitManager(DuelsPartyPlugin plugin) {
+        this.plugin = plugin;
     }
 
-    @Override
-    public void execute(Player player, String[] args, String lang) {
-        if (!player.hasPermission("duelsparty.admin")) return;
+    public void loadKits() {
+        File kitsFolder = new File(plugin.getDataFolder(), "kits");
+        if (!kitsFolder.exists()) kitsFolder.mkdirs();
 
-        if (args.length < 2 || !args[0].equalsIgnoreCase("save")) {
-            player.sendMessage("§cUżycie: /ka save <nazwa>");
+        File[] files = kitsFolder.listFiles((dir, name) -> name.endsWith(".yml"));
+        if (files == null) return;
+
+        kits.clear();
+        for (File file : files) {
+            YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+            String id = file.getName().replace(".yml", "");
+
+            // Wersja 1.21.1 automatycznie obsługuje Data Components przy deserializacji ItemStack
+            List<ItemStack> content = (List<ItemStack>) config.getList("content", new ArrayList<>());
+            ItemStack[] armor = ((List<ItemStack>) config.getList("armor", Arrays.asList(new ItemStack[4])))
+                    .toArray(new ItemStack[0]);
+            ItemStack offhand = config.getItemStack("offhand", new ItemStack(Material.AIR));
+
+            Kit kit = new Kit(id, config.getString("name", id), content, armor, offhand, new HashMap<>());
+            kits.put(id.toLowerCase(), kit);
+
+            DuelsPartyPlugin.debug("Załadowano Kit: " + id + " (Data Components OK)");
+        }
+    }
+
+    public void applyKit(Player player, String kitId) {
+        Kit kit = kits.get(kitId.toLowerCase());
+        if (kit == null) {
+            DuelsPartyPlugin.debug("BŁĄD: Próba nadania nieistniejącego kitu: " + kitId);
             return;
         }
 
-        String kitName = args[1].toLowerCase();
-        File file = new File(DuelsPartyPlugin.getInstance().getDataFolder() + "/kits", kitName + ".yml");
-        YamlConfiguration config = new YamlConfiguration();
+        PlayerInventory inv = player.getInventory();
+        inv.clear();
 
-        // Pobieramy przedmioty z zachowaniem wszystkich komponentów 1.21.1
-        config.set("name", kitName);
-        config.set("content", Arrays.asList(player.getInventory().getStorageContents()));
-        config.set("armor", Arrays.asList(player.getInventory().getArmorContents()));
-        config.set("offhand", player.getInventory().getItemInOffHand());
-
-        try {
-            config.save(file);
-            player.sendMessage("§aZapisano kit: " + kitName + " (Obsługa Data Components 1.21.1)");
-            DuelsPartyPlugin.getInstance().getKitManager().loadKits(); // Przeładuj RAM
-        } catch (IOException e) {
-            player.sendMessage("§cBłąd zapisu pliku!");
-            e.printStackTrace();
+        // Nadawanie przedmiotów - Paper zachowuje Data Components (Enchants, Potion Effects, Custom Names)
+        for (int i = 0; i < kit.content().size(); i++) {
+            if (kit.content().get(i) != null) inv.setItem(i, kit.content().get(i).clone());
         }
+
+        inv.setArmorContents(Arrays.stream(kit.armor()).map(item -> item != null ? item.clone() : null).toArray(ItemStack[]::new));
+        inv.setItemInOffHand(kit.offhand() != null ? kit.offhand().clone() : null);
+
+        DuelsPartyPlugin.debug("Nadano zestaw " + kitId + " graczowi " + player.getName());
+    }
+
+    public Optional<Kit> getKit(String id) {
+        return Optional.ofNullable(kits.get(id.toLowerCase()));
+    }
+
+    public Set<String> getKitNames() {
+        return kits.keySet();
     }
 }
---- FILE: src/main/java/org/antix/duelsparty/command/DuelAcceptCommand.java ---
-package org.antix.duelsparty.command;
+--- FILE: src/main/java/org/antix/duelsparty/duel/kit/Kit.java ---
+package org.antix.duelsparty.duel.kit;
 
-import org.antix.duelsparty.DuelException;
-import org.antix.duelsparty.DuelsPartyPlugin;
-import org.antix.duelsparty.duel.Duel;
-import org.antix.duelsparty.duel.DuelManager;
-import org.antix.duelsparty.duel.InviteContext;
-import org.antix.duelsparty.util.MessageService;
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
-
+import org.bukkit.inventory.ItemStack;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
-public class DuelAcceptCommand extends BaseCommand {
-    private final DuelManager duelManager;
-
-    public DuelAcceptCommand(DuelManager duelManager, MessageService messageService) {
-        super(messageService);
-        this.duelManager = duelManager;
-    }
-
-    @Override
-    public void execute(Player player, String[] args, String lang) {
-        DuelsPartyPlugin.debug("Gracz " + player.getName() + " wpisał /accept");
-
-        // Pobieramy zaproszenie dla tego gracza
-        Optional<InviteContext> inviteOpt = duelManager.getInvite(player.getUniqueId());
-
-        if (inviteOpt.isEmpty()) {
-            DuelsPartyPlugin.debug("Brak oczekujących zaproszeń dla: " + player.getName());
-            player.sendMessage(messageService.getMessage(lang, "error.no-pending-invite"));
-            return;
-        }
-
-        InviteContext invite = inviteOpt.get();
-
-        // Zmieniono z challengerId() na senderUuid(), aby pasowało do rekordu w DuelManager
-        Player challenger = Bukkit.getPlayer(invite.senderUuid());
-
-        if (challenger == null || !challenger.isOnline()) {
-            DuelsPartyPlugin.debug("Wzywający jest offline.");
-            player.sendMessage(messageService.getMessage(lang, "error.player-offline"));
-            duelManager.removeInvite(player.getUniqueId());
-            return;
-        }
-
-        // Wszystko gra! Tworzymy pojedynek
-        DuelsPartyPlugin.debug("Zaproszenie poprawne. Przekazuję do DuelManager...");
-
-        List<Player> teamA = List.of(challenger);
-        List<Player> teamB = List.of(player);
-
-        try {
-            // Wyciągamy kitId z zaproszenia, które teraz posiada to pole
-            String kitId = invite.kitId();
-
-            // Wywołujemy createDuel z 4 argumentami (teamA, teamB, arena, kitId)
-            Duel duel = duelManager.createDuel(teamA, teamB, invite.requestedArena(), kitId);
-            duel.start();
-
-            // Czyścimy zaproszenie po sukcesie
-            duelManager.removeInvite(player.getUniqueId());
-
-        } catch (DuelException e) {
-            DuelsPartyPlugin.debug("Błąd podczas tworzenia pojedynku: " + e.getMessageKey());
-            player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
-        }
-
-        try {
-            // Pobieramy dane z zaproszenia
-            String kitId = invite.kitId();
-
-            // Wywołujemy poprawną metodę: (List<Player>, List<Player>, Arena, String)
-            Duel duel = duelManager.createDuel(teamA, teamB, invite.requestedArena(), kitId);
-            duel.start();
-
-            duelManager.removeInvite(player.getUniqueId());
-        } catch (DuelException e) {
-            player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
-        }
-    }
-}
---- FILE: src/main/java/org/antix/duelsparty/command/BaseCommand.java ---
-package org.antix.duelsparty.command;
-
-import org.antix.duelsparty.DuelException;
-import org.antix.duelsparty.util.MessageService;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
-import org.jetbrains.annotations.NotNull;
-
-public abstract class BaseCommand implements CommandExecutor {
-    protected final MessageService messageService;
-
-    protected BaseCommand(MessageService messageService) {
-        this.messageService = messageService;
-    }
-
-    @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage("§cOnly players can use this command!");
-            return true;
-        }
-
-    // Wyciągamy język raz tutaj
-        String lang = player.getLocale().split("_")[0].toLowerCase();
-
-        try {
-            // PRZEKAZUJEMY lang jako trzeci argument!
-            execute(player, args, lang);
-        } catch (DuelException e) {
-            player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
-        }
-
-        return true;
-    }
-
-    // To jest kluczowe: metoda jest abstrakcyjna i nie ma ciała!
-    // Każda komenda (Invite, Accept) wypełni ją po swojemu.
-    public abstract void execute(Player player, String[] args, String lang);
-}
---- FILE: src/main/java/org/antix/duelsparty/command/DuelStatsCommand.java ---
-package org.antix.duelsparty.command;
-
-import org.antix.duelsparty.util.MessageService;
-import org.bukkit.entity.Player;
-
-public class DuelStatsCommand extends BaseCommand {
-
-    public DuelStatsCommand(MessageService messageService) {
-        super(messageService);
-    }
-
-    @Override
-    public void execute(Player player, String[] args, String lang) {
-        // Docelowo: Pobieranie z DatabaseManager asynchronicznie
-        player.sendMessage("§6§l» §eTwoje statystyki (Sesja):");
-        player.sendMessage("§7Zabójstwa: §f0");
-        player.sendMessage("§7Śmierci: §f0");
-        player.sendMessage("§7Celność: §f0%");
-        player.sendMessage("§8(Pełne statystyki MySQL zostaną wdrożone w następnym module)");
-    }
-}
---- FILE: src/main/java/org/antix/duelsparty/command/DuelInviteCommand.java ---
-package org.antix.duelsparty.command;
-
-import org.antix.duelsparty.DuelException;
-import org.antix.duelsparty.duel.DuelManager;
-import org.antix.duelsparty.duel.arena.Arena;
-import org.antix.duelsparty.util.MessageService;
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
-
-public class DuelInviteCommand extends BaseCommand {
-    private final DuelManager duelManager;
-
-    public DuelInviteCommand(DuelManager duelManager, MessageService messageService) {
-        super(messageService);
-        this.duelManager = duelManager;
-    }
-
-    @Override
-    public void execute(Player player, String[] args, String lang){
-        // Pobieramy język gracza (np. "pl_pl" -> "pl")
-
-        if (args.length < 1) {
-            player.sendMessage(messageService.getMessage(lang, "error.usage-duel"));
-            return;
-        }
-
-        if (args.length < 1) {
-            throw new DuelException("error.usage-duel");
-        }
-
-        Player target = Bukkit.getPlayer(args[0]);
-        if (target == null || !target.isOnline()) {
-            throw new DuelException("error.player-offline");
-        }
-
-        // Obsługa opcjonalnej areny (drugi argument po nicku)
-        org.antix.duelsparty.duel.arena.Arena requestedArena = null;
-        if (args.length >= 2) {
-            String arenaName = args[1];
-            requestedArena = duelManager.getArenaByName(arenaName)
-                    .orElseThrow(() -> new DuelException("error.arena-not-found"));
-        }
-
-// ... po walidacji targeta i areny ...
-
-        String kitId = "default"; // Domyślnie
-        if (args.length >= 3) { // Jeśli gracz wpisał /duel <nick> <arena> <kit>
-            kitId = args[2];
-        }
-
-// Wywołujemy zaktualizowaną metodę sendInvite
-        duelManager.sendInvite(player, target, requestedArena, kitId);
-
-        // Wiadomości do graczy
-
-        player.sendMessage(messageService.getMessage(lang, "success.invite-sent"));
-
-        String targetLang = target.getLocale().split("_")[0];
-        target.sendMessage(messageService.getMessage(targetLang, "info.invite-received")
-                .replace("{player}", player.getName()));
-    }
-}
---- FILE: src/main/java/org/antix/duelsparty/DuelsPartyPlugin.java ---
-package org.antix.duelsparty;
-
-
-import org.antix.duelsparty.command.ArenaAdminCommand;
-import org.antix.duelsparty.command.DuelAcceptCommand;
-import org.antix.duelsparty.command.DuelInviteCommand;
-import org.antix.duelsparty.command.DuelStatsCommand;
-import org.antix.duelsparty.duel.kit.KitManager;
-import org.antix.duelsparty.party.PartyManager;
-import org.antix.duelsparty.duel.DuelListener;
-import org.antix.duelsparty.duel.DuelManager;
-import org.antix.duelsparty.util.MessageService;
-import org.bukkit.command.PluginCommand;
-import org.bukkit.plugin.java.JavaPlugin;
-
-public final class DuelsPartyPlugin extends JavaPlugin {
-
-    private DuelManager duelManager;
-    private KitManager kitManager;
-    private MessageService messageService;
-    private final PartyManager partyManager = new PartyManager();
-    private static DuelsPartyPlugin instance;
-
-    @Override
-    public void onEnable() {
-        // 1. Najpierw KitManager
-        this.kitManager = new KitManager(this);
-        this.kitManager.loadKits();
-
-// 2. Potem DuelManager z wstrzykniętym kitManagerem
-        this.duelManager = new DuelManager(kitManager);
-        instance = this;
-        saveDefaultConfig();
-// 2. Zainicjalizuj tutaj, przekazując "this" jako JavaPlugin
-        this.messageService = new MessageService(this);
-
-        saveDefaultConfig();
-        duelManager.loadArenas(getConfig());
-
-        // Ważne: najpierw inicjalizujemy messageService, potem rejestrujemy komendy,
-        // bo komendy go potrzebują!
-        registerCommands();
-
-        getServer().getPluginManager().registerEvents(new DuelListener(duelManager, messageService), this);
-        showWelcomeMessage();
-    }
-
-    @Override
-    public void onDisable() {
-        // Zapisywanie aren przy wyłączaniu
-        getLogger().info("Zapisywanie aren...");
-        duelManager.saveArenas(getConfig());
-        saveConfig();
-    }
-
-    private void registerCommands() {
-        // Wszystkie komendy teraz używają tej samej, bezpiecznej metody
-        registerCommand("duel", new DuelInviteCommand(duelManager, messageService));
-        registerCommand("accept", new DuelAcceptCommand(duelManager, messageService));
-        registerCommand("dueladmin", new ArenaAdminCommand(duelManager));
-        registerCommand("duelstats", new DuelStatsCommand(messageService));
-    }
-
-    private void registerCommand(String name, org.bukkit.command.CommandExecutor executor) {
-        PluginCommand command = getCommand(name);
-        if (command != null) {
-            command.setExecutor(executor);
-        } else {
-            // Twoja metoda pomocnicza teraz pilnuje porządku dla KAŻDEJ komendy
-            getLogger().severe("Błąd! Komenda /" + name + " nie została znaleziona w plugin.yml!");
-        }
-    }
-
-    private void showWelcomeMessage() {
-        getLogger().info("================================");
-        getLogger().info(" DuelsParty Plugin Enabled! ");
-        getLogger().info(" Autor: Antix ");
-        getLogger().info("================================");
-    }
-    public static void debug(String message) {
-        if (instance != null && instance.getConfig().getBoolean("debug", false)) {
-            instance.getLogger().info("[DEBUG] " + message);
-        }
-    }
-    // Metoda statyczna, której szuka IDE
-    public static DuelsPartyPlugin getInstance() {
-        return instance;
-    }
-    public DuelManager getDuelManager() { return duelManager; }
-    public MessageService getMessageService() { return messageService; }
-    public KitManager getKitManager(){return kitManager;}
-}
---- FILE: src/main/java/org/antix/duelsparty/duel/arena/Arena.java ---
-package org.antix.duelsparty.duel.arena;
-
-
-import org.antix.duelsparty.util.ArenaLocation;
-
-public class Arena {
-    private final String name;
-    private final ArenaLocation spawn1;
-    private final ArenaLocation spawn2;
-    private boolean busy = false;
-
-    public Arena(String name, ArenaLocation spawn1, ArenaLocation spawn2) {
-        this.name = name;
-        this.spawn1 = spawn1;
-        this.spawn2 = spawn2;
-        this.busy = false;
-    }
-
-    // Gettery...
-    public ArenaLocation spawn1() { return spawn1; }
-    public ArenaLocation spawn2() { return spawn2; }
-    public String getName() { return name; }
-    public boolean isBusy() { return busy; }
-    public void setBusy(boolean busy) { this.busy = busy; }
-}
+public record Kit(
+        String id,
+        String displayName,
+        List<ItemStack> content,    // Główny ekwipunek
+        ItemStack[] armor,          // Zbroja (4 sloty)
+        ItemStack offhand,          // Tarcza/Totem
+        Map<String, Object> settings // Dodatkowe opcje np. budowanie, mikstury
+) {}
 --- FILE: src/main/java/org/antix/duelsparty/duel/DuelListener.java ---
 package org.antix.duelsparty.duel;
 
 import org.antix.duelsparty.DuelsPartyPlugin;
 import org.antix.duelsparty.duel.match.MatchState;
 import org.antix.duelsparty.util.MessageService;
+import org.antix.duelsparty.command.ArenaAdminCommand;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -463,8 +109,10 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 
 public class DuelListener implements Listener {
 
@@ -573,6 +221,61 @@ public class DuelListener implements Listener {
                 }
             }
         });
+    }
+
+    // Wewnątrz DuelListener.java - dodaj obsługę czyszczenia sesji admina
+    @EventHandler
+    public void onAdminQuit(PlayerQuitEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
+
+        // Pobieramy komendę z Bukkit, jeśli jest zarejestrowana, i czyścimy dane
+        org.bukkit.command.PluginCommand cmd = Bukkit.getPluginCommand("dueladmin");
+        if (cmd != null && cmd.getExecutor() instanceof ArenaAdminCommand adminCmd) {
+            adminCmd.clearPendingSession(uuid);
+            DuelsPartyPlugin.debug("Wyczyszczono sesję tworzenia areny dla: " + event.getPlayer().getName());
+        }
+    }
+}
+--- FILE: src/main/java/org/antix/duelsparty/duel/arena/Arena.java ---
+package org.antix.duelsparty.duel.arena;
+
+
+import org.antix.duelsparty.util.ArenaLocation;
+
+public class Arena {
+    private final String name;
+    private final ArenaLocation spawn1;
+    private final ArenaLocation spawn2;
+    private boolean busy = false;
+
+    public Arena(String name, ArenaLocation spawn1, ArenaLocation spawn2) {
+        this.name = name;
+        this.spawn1 = spawn1;
+        this.spawn2 = spawn2;
+        this.busy = false;
+    }
+
+    // Gettery...
+    public ArenaLocation spawn1() { return spawn1; }
+    public ArenaLocation spawn2() { return spawn2; }
+    public String getName() { return name; }
+    public boolean isBusy() { return busy; }
+    public void setBusy(boolean busy) { this.busy = busy; }
+}
+--- FILE: src/main/java/org/antix/duelsparty/duel/InviteContext.java ---
+package org.antix.duelsparty.duel;
+
+import org.antix.duelsparty.duel.arena.Arena;
+import java.util.UUID;
+
+public record InviteContext(
+        UUID senderUuid,
+        Arena requestedArena,
+        String kitId, // Nowe pole: ID wybranego zestawu
+        long timestamp
+) {
+    public boolean isExpired() {
+        return System.currentTimeMillis() - timestamp > 30000;
     }
 }
 --- FILE: src/main/java/org/antix/duelsparty/duel/Duel.java ---
@@ -702,31 +405,6 @@ public class Duel {
     public Player getPlayer1() { return teamA.isEmpty() ? null : Bukkit.getPlayer(teamA.get(0)); }
     public Player getPlayer2() { return teamB.isEmpty() ? null : Bukkit.getPlayer(teamB.get(0)); }
 }
---- FILE: src/main/java/org/antix/duelsparty/duel/InviteContext.java ---
-package org.antix.duelsparty.duel;
-
-import org.antix.duelsparty.duel.arena.Arena;
-import java.util.UUID;
-
-public record InviteContext(
-        UUID senderUuid,
-        Arena requestedArena,
-        String kitId, // Nowe pole: ID wybranego zestawu
-        long timestamp
-) {
-    public boolean isExpired() {
-        return System.currentTimeMillis() - timestamp > 30000;
-    }
-}
---- FILE: src/main/java/org/antix/duelsparty/duel/match/MatchState.java ---
-package org.antix.duelsparty.duel.match;
-
-public enum MatchState {
-    PREPARATION,
-    STARTING,  // Odliczanie (3, 2, 1...)
-    FIGHTING,  // Walka trwa
-    ENDING     // Walka zakończona, teleportacja na spawn
-}
 --- FILE: src/main/java/org/antix/duelsparty/duel/match/MatchPlayerData.java ---
 package org.antix.duelsparty.duel.match;
 
@@ -758,6 +436,15 @@ public class MatchPlayerData {
         player.setFireTicks(0);
     }
     // Gettery/Settery dla statystyk
+}
+--- FILE: src/main/java/org/antix/duelsparty/duel/match/MatchState.java ---
+package org.antix.duelsparty.duel.match;
+
+public enum MatchState {
+    PREPARATION,
+    STARTING,  // Odliczanie (3, 2, 1...)
+    FIGHTING,  // Walka trwa
+    ENDING     // Walka zakończona, teleportacja na spawn
 }
 --- FILE: src/main/java/org/antix/duelsparty/duel/DuelManager.java ---
 package org.antix.duelsparty.duel;
@@ -911,95 +598,438 @@ public class DuelManager {
         }
         DuelsPartyPlugin.debug("Loaded " + arenas.size() + " arenas from config.");
     }
+    public List<String> getArenaNames() {
+        return arenas.stream().map(Arena::getName).toList();
+    }
+
+    public void removeArena(String name) {
+        arenas.removeIf(arena -> arena.getName().equalsIgnoreCase(name));
+    }
 }
---- FILE: src/main/java/org/antix/duelsparty/duel/kit/KitManager.java ---
-package org.antix.duelsparty.duel.kit;
+--- FILE: src/main/java/org/antix/duelsparty/command/KitAdminCommand.java ---
+package org.antix.duelsparty.command;
 
 import org.antix.duelsparty.DuelsPartyPlugin;
-import org.bukkit.Material;
-import org.bukkit.configuration.ConfigurationSection;
+import org.antix.duelsparty.util.MessageService;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.PlayerInventory;
-
 import java.io.File;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.io.IOException;
+import java.util.Arrays;
 
-public class KitManager {
-    private final DuelsPartyPlugin plugin;
-    private final Map<String, Kit> kits = new ConcurrentHashMap<>();
-
-    public KitManager(DuelsPartyPlugin plugin) {
-        this.plugin = plugin;
+public class KitAdminCommand extends BaseCommand {
+    public KitAdminCommand(MessageService messageService) {
+        super(messageService);
     }
 
-    public void loadKits() {
-        File kitsFolder = new File(plugin.getDataFolder(), "kits");
-        if (!kitsFolder.exists()) kitsFolder.mkdirs();
+    @Override
+    public void execute(Player player, String[] args, String lang) {
+        if (!player.hasPermission("duelsparty.admin")) return;
 
-        File[] files = kitsFolder.listFiles((dir, name) -> name.endsWith(".yml"));
-        if (files == null) return;
-
-        kits.clear();
-        for (File file : files) {
-            YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
-            String id = file.getName().replace(".yml", "");
-
-            // Wersja 1.21.1 automatycznie obsługuje Data Components przy deserializacji ItemStack
-            List<ItemStack> content = (List<ItemStack>) config.getList("content", new ArrayList<>());
-            ItemStack[] armor = ((List<ItemStack>) config.getList("armor", Arrays.asList(new ItemStack[4])))
-                    .toArray(new ItemStack[0]);
-            ItemStack offhand = config.getItemStack("offhand", new ItemStack(Material.AIR));
-
-            Kit kit = new Kit(id, config.getString("name", id), content, armor, offhand, new HashMap<>());
-            kits.put(id.toLowerCase(), kit);
-
-            DuelsPartyPlugin.debug("Załadowano Kit: " + id + " (Data Components OK)");
-        }
-    }
-
-    public void applyKit(Player player, String kitId) {
-        Kit kit = kits.get(kitId.toLowerCase());
-        if (kit == null) {
-            DuelsPartyPlugin.debug("BŁĄD: Próba nadania nieistniejącego kitu: " + kitId);
+        if (args.length < 2 || !args[0].equalsIgnoreCase("save")) {
+            player.sendMessage("§cUżycie: /ka save <nazwa>");
             return;
         }
 
-        PlayerInventory inv = player.getInventory();
-        inv.clear();
+        String kitName = args[1].toLowerCase();
+        File file = new File(DuelsPartyPlugin.getInstance().getDataFolder() + "/kits", kitName + ".yml");
+        YamlConfiguration config = new YamlConfiguration();
 
-        // Nadawanie przedmiotów - Paper zachowuje Data Components (Enchants, Potion Effects, Custom Names)
-        for (int i = 0; i < kit.content().size(); i++) {
-            if (kit.content().get(i) != null) inv.setItem(i, kit.content().get(i).clone());
+        // Pobieramy przedmioty z zachowaniem wszystkich komponentów 1.21.1
+        config.set("name", kitName);
+        config.set("content", Arrays.asList(player.getInventory().getStorageContents()));
+        config.set("armor", Arrays.asList(player.getInventory().getArmorContents()));
+        config.set("offhand", player.getInventory().getItemInOffHand());
+
+        try {
+            config.save(file);
+            player.sendMessage("§aZapisano kit: " + kitName + " (Obsługa Data Components 1.21.1)");
+            DuelsPartyPlugin.getInstance().getKitManager().loadKits(); // Przeładuj RAM
+        } catch (IOException e) {
+            player.sendMessage("§cBłąd zapisu pliku!");
+            e.printStackTrace();
         }
-
-        inv.setArmorContents(Arrays.stream(kit.armor()).map(item -> item != null ? item.clone() : null).toArray(ItemStack[]::new));
-        inv.setItemInOffHand(kit.offhand() != null ? kit.offhand().clone() : null);
-
-        DuelsPartyPlugin.debug("Nadano zestaw " + kitId + " graczowi " + player.getName());
-    }
-
-    public Optional<Kit> getKit(String id) {
-        return Optional.ofNullable(kits.get(id.toLowerCase()));
     }
 }
---- FILE: src/main/java/org/antix/duelsparty/duel/kit/Kit.java ---
-package org.antix.duelsparty.duel.kit;
+--- FILE: src/main/java/org/antix/duelsparty/command/ArenaAdminCommand.java ---
+package org.antix.duelsparty.command;
 
-import org.bukkit.inventory.ItemStack;
-import java.util.List;
+import org.antix.duelsparty.duel.DuelManager;
+import org.antix.duelsparty.util.ArenaLocation;
+import org.antix.duelsparty.duel.arena.Arena;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
-public record Kit(
-        String id,
-        String displayName,
-        List<ItemStack> content,    // Główny ekwipunek
-        ItemStack[] armor,          // Zbroja (4 sloty)
-        ItemStack offhand,          // Tarcza/Totem
-        Map<String, Object> settings // Dodatkowe opcje np. budowanie, mikstury
-) {}
+public class ArenaAdminCommand implements CommandExecutor {
+    private final DuelManager duelManager;
+
+    // Mapa przechowująca pierwszy punkt spawnu do czasu ustawienia drugiego
+    private final Map<UUID, ArenaLocation> pendingSpawn1 = new HashMap<>();
+
+    public ArenaAdminCommand(DuelManager duelManager) {
+        this.duelManager = duelManager;
+    }
+
+    @Override
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage("Ta komenda jest tylko dla graczy!");
+            return true;
+        }
+
+        UUID uuid = player.getUniqueId(); // Używamy UUID zamiast obiektu Player
+
+        if (args.length < 2) {
+            player.sendMessage("§6§l» §cPoprawne użycie: §f/da <set1|set2> <nazwa>");
+            return true;
+        }
+
+        String action = args[0].toLowerCase();
+        String arenaName = args[1];
+
+        switch (action) {
+            case "set1" -> {
+                ArenaLocation loc1 = ArenaLocation.fromLocation(player.getLocation());
+                pendingSpawn1.put(uuid, loc1); // Zapisujemy po UUID
+                player.sendMessage("§6§l» §aPomyślnie ustawiono §fSpawn 1.");
+            }
+            case "set2" -> {
+                if (!pendingSpawn1.containsKey(uuid)) {
+                    player.sendMessage("§6§l» §cBłąd! Najpierw użyj set1.");
+                    return true;
+                }
+                ArenaLocation s1 = pendingSpawn1.remove(player);
+                ArenaLocation s2 = ArenaLocation.fromLocation(player.getLocation());
+
+                // Tworzymy arenę i dodajemy do managera
+                Arena newArena = new Arena(arenaName, s1, s2);
+                duelManager.addArena(newArena);
+
+                player.sendMessage("§6§l» §6Arena §f" + arenaName + " §6została poprawnie utworzona!");
+                player.sendMessage("§7Możesz teraz wyzwać gracza wpisując: §f/duel <nick> " + arenaName);
+            }
+            default -> player.sendMessage("§6§l» §cNieznana akcja! Użyj §fset1 §club §fset2§c.");
+        }
+
+        return true;
+    }
+    // Metoda pomocnicza dla Listenera
+    public void clearPendingSession(UUID uuid) {
+        pendingSpawn1.remove(uuid);
+    }
+}
+--- FILE: src/main/java/org/antix/duelsparty/command/DuelTabCompleter.java ---
+package org.antix.duelsparty.command;
+
+import org.antix.duelsparty.DuelsPartyPlugin;
+import org.bukkit.Bukkit;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class DuelTabCompleter implements TabCompleter {
+
+    @Override
+    public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
+        List<String> completions = new ArrayList<>();
+
+        if (args.length == 1) {
+            // Podpowiadaj graczy online (z wyłączeniem siebie)
+            String current = args[0].toLowerCase();
+            return Bukkit.getOnlinePlayers().stream()
+                    .map(Player::getName)
+                    .filter(name -> name.toLowerCase().startsWith(current))
+                    .filter(name -> !name.equals(sender.getName()))
+                    .collect(Collectors.toList());
+        }
+
+        if (args.length == 2) {
+            // Podpowiadaj areny
+            String current = args[1].toLowerCase();
+            // Uwaga: Zakładam, że masz metodę getArenas() lub podobną w DuelManager
+            // Jeśli nie, musimy ją dodać do DuelManager
+            return DuelsPartyPlugin.getInstance().getDuelManager().getArenaNames().stream()
+                    .filter(name -> name.toLowerCase().startsWith(current))
+                    .collect(Collectors.toList());
+        }
+
+        if (args.length == 3) {
+            // Podpowiadaj kity
+            String current = args[2].toLowerCase();
+            return DuelsPartyPlugin.getInstance().getKitManager().getKitNames().stream()
+                    .filter(name -> name.toLowerCase().startsWith(current))
+                    .collect(Collectors.toList());
+        }
+
+        return completions;
+    }
+}
+--- FILE: src/main/java/org/antix/duelsparty/command/ArenaAdminTabCompleter.java ---
+package org.antix.duelsparty.command;
+
+import org.antix.duelsparty.DuelsPartyPlugin;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
+import java.util.stream.Stream;
+
+public class ArenaAdminTabCompleter implements TabCompleter {
+
+    private static final List<String> ACTIONS = List.of("set1", "set2", "delete", "tp");
+
+    @Override
+    public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
+        if (!sender.hasPermission("duelsparty.admin")) return List.of();
+
+        if (args.length == 1) {
+            return ACTIONS.stream()
+                    .filter(s -> s.startsWith(args[0].toLowerCase()))
+                    .toList();
+        }
+
+        if (args.length == 2) {
+            String action = args[0].toLowerCase();
+            // Dla delete i tp podpowiadamy istniejące areny
+            if (action.equals("delete") || action.equals("tp") || action.equals("set2")) {
+                return DuelsPartyPlugin.getInstance().getDuelManager().getArenaNames().stream()
+                        .filter(name -> name.toLowerCase().startsWith(args[1].toLowerCase()))
+                        .toList();
+            }
+        }
+
+        return List.of();
+    }
+}
+--- FILE: src/main/java/org/antix/duelsparty/command/DuelStatsCommand.java ---
+package org.antix.duelsparty.command;
+
+import org.antix.duelsparty.util.MessageService;
+import org.bukkit.entity.Player;
+
+public class DuelStatsCommand extends BaseCommand {
+
+    public DuelStatsCommand(MessageService messageService) {
+        super(messageService);
+    }
+
+    @Override
+    public void execute(Player player, String[] args, String lang) {
+        // Docelowo: Pobieranie z DatabaseManager asynchronicznie
+        player.sendMessage("§6§l» §eTwoje statystyki (Sesja):");
+        player.sendMessage("§7Zabójstwa: §f0");
+        player.sendMessage("§7Śmierci: §f0");
+        player.sendMessage("§7Celność: §f0%");
+        player.sendMessage("§8(Pełne statystyki MySQL zostaną wdrożone w następnym module)");
+    }
+}
+--- FILE: src/main/java/org/antix/duelsparty/command/BaseCommand.java ---
+package org.antix.duelsparty.command;
+
+import org.antix.duelsparty.DuelException;
+import org.antix.duelsparty.util.MessageService;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
+
+public abstract class BaseCommand implements CommandExecutor {
+    protected final MessageService messageService;
+
+    protected BaseCommand(MessageService messageService) {
+        this.messageService = messageService;
+    }
+
+    @Override
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage("§cOnly players can use this command!");
+            return true;
+        }
+
+    // Wyciągamy język raz tutaj
+        String lang = player.getLocale().split("_")[0].toLowerCase();
+
+        try {
+            // PRZEKAZUJEMY lang jako trzeci argument!
+            execute(player, args, lang);
+        } catch (DuelException e) {
+            player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
+        }
+
+        return true;
+    }
+
+    // To jest kluczowe: metoda jest abstrakcyjna i nie ma ciała!
+    // Każda komenda (Invite, Accept) wypełni ją po swojemu.
+    public abstract void execute(Player player, String[] args, String lang);
+}
+--- FILE: src/main/java/org/antix/duelsparty/command/DuelInviteCommand.java ---
+package org.antix.duelsparty.command;
+
+import org.antix.duelsparty.DuelException;
+import org.antix.duelsparty.duel.DuelManager;
+import org.antix.duelsparty.duel.arena.Arena;
+import org.antix.duelsparty.util.MessageService;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+
+public class DuelInviteCommand extends BaseCommand {
+    private final DuelManager duelManager;
+
+    public DuelInviteCommand(DuelManager duelManager, MessageService messageService) {
+        super(messageService);
+        this.duelManager = duelManager;
+    }
+
+    @Override
+    public void execute(Player player, String[] args, String lang){
+        // Pobieramy język gracza (np. "pl_pl" -> "pl")
+
+        if (args.length < 1) {
+            player.sendMessage(messageService.getMessage(lang, "error.usage-duel"));
+            return;
+        }
+
+        if (args.length < 1) {
+            throw new DuelException("error.usage-duel");
+        }
+
+        Player target = Bukkit.getPlayer(args[0]);
+        if (target == null || !target.isOnline()) {
+            throw new DuelException("error.player-offline");
+        }
+
+        // Obsługa opcjonalnej areny (drugi argument po nicku)
+        org.antix.duelsparty.duel.arena.Arena requestedArena = null;
+        if (args.length >= 2) {
+            String arenaName = args[1];
+            requestedArena = duelManager.getArenaByName(arenaName)
+                    .orElseThrow(() -> new DuelException("error.arena-not-found"));
+        }
+
+// ... po walidacji targeta i areny ...
+
+        String kitId = "default"; // Domyślnie
+        if (args.length >= 3) { // Jeśli gracz wpisał /duel <nick> <arena> <kit>
+            kitId = args[2];
+        }
+
+// Wywołujemy zaktualizowaną metodę sendInvite
+        duelManager.sendInvite(player, target, requestedArena, kitId);
+
+        // Wiadomości do graczy
+
+        player.sendMessage(messageService.getMessage(lang, "success.invite-sent"));
+
+        String targetLang = target.getLocale().split("_")[0];
+        target.sendMessage(messageService.getMessage(targetLang, "info.invite-received")
+                .replace("{player}", player.getName()));
+    }
+}
+--- FILE: src/main/java/org/antix/duelsparty/command/DuelAcceptCommand.java ---
+package org.antix.duelsparty.command;
+
+import org.antix.duelsparty.DuelException;
+import org.antix.duelsparty.DuelsPartyPlugin;
+import org.antix.duelsparty.duel.Duel;
+import org.antix.duelsparty.duel.DuelManager;
+import org.antix.duelsparty.duel.InviteContext;
+import org.antix.duelsparty.util.MessageService;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+
+import java.util.List;
+import java.util.Optional;
+
+public class DuelAcceptCommand extends BaseCommand {
+    private final DuelManager duelManager;
+
+    public DuelAcceptCommand(DuelManager duelManager, MessageService messageService) {
+        super(messageService);
+        this.duelManager = duelManager;
+    }
+
+    @Override
+    public void execute(Player player, String[] args, String lang) {
+        DuelsPartyPlugin.debug("Gracz " + player.getName() + " wpisał /accept");
+
+        // Pobieramy zaproszenie dla tego gracza
+        Optional<InviteContext> inviteOpt = duelManager.getInvite(player.getUniqueId());
+
+        if (inviteOpt.isEmpty()) {
+            DuelsPartyPlugin.debug("Brak oczekujących zaproszeń dla: " + player.getName());
+            player.sendMessage(messageService.getMessage(lang, "error.no-pending-invite"));
+            return;
+        }
+
+        InviteContext invite = inviteOpt.get();
+
+        // Zmieniono z challengerId() na senderUuid(), aby pasowało do rekordu w DuelManager
+        Player challenger = Bukkit.getPlayer(invite.senderUuid());
+
+        if (challenger == null || !challenger.isOnline()) {
+            DuelsPartyPlugin.debug("Wzywający jest offline.");
+            player.sendMessage(messageService.getMessage(lang, "error.player-offline"));
+            duelManager.removeInvite(player.getUniqueId());
+            return;
+        }
+
+        // Wszystko gra! Tworzymy pojedynek
+        DuelsPartyPlugin.debug("Zaproszenie poprawne. Przekazuję do DuelManager...");
+
+        List<Player> teamA = List.of(challenger);
+        List<Player> teamB = List.of(player);
+
+        try {
+            // Wyciągamy kitId z zaproszenia, które teraz posiada to pole
+            String kitId = invite.kitId();
+
+            // Wywołujemy createDuel z 4 argumentami (teamA, teamB, arena, kitId)
+            Duel duel = duelManager.createDuel(teamA, teamB, invite.requestedArena(), kitId);
+            duel.start();
+
+            // Czyścimy zaproszenie po sukcesie
+            duelManager.removeInvite(player.getUniqueId());
+
+        } catch (DuelException e) {
+            DuelsPartyPlugin.debug("Błąd podczas tworzenia pojedynku: " + e.getMessageKey());
+            player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
+        }
+
+        try {
+            // Pobieramy dane z zaproszenia
+            String kitId = invite.kitId();
+
+            // Wywołujemy poprawną metodę: (List<Player>, List<Player>, Arena, String)
+            Duel duel = duelManager.createDuel(teamA, teamB, invite.requestedArena(), kitId);
+            duel.start();
+
+            duelManager.removeInvite(player.getUniqueId());
+        } catch (DuelException e) {
+            player.sendMessage(messageService.getMessage(lang, e.getMessageKey()));
+        }
+    }
+}
 --- FILE: src/main/java/org/antix/duelsparty/DuelException.java ---
 package org.antix.duelsparty;
 
@@ -1014,59 +1044,310 @@ public class DuelException extends RuntimeException {
         return messageKey;
     }
 }
---- FILE: src/main/java/org/antix/duelsparty/party/Party.java ---
-package org.antix.duelsparty.party;
+--- FILE: src/main/java/org/antix/duelsparty/database/NullDatabase.java ---
+package org.antix.duelsparty.database;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
-public record Party(UUID leader, List<UUID> members) {
-    public boolean isLeader(UUID uuid) {
-        return leader.equals(uuid);
+public class NullDatabase implements DatabaseService {
+    @Override
+    public void saveMatchResult(UUID winner, UUID loser, int winnerKills, int loserKills) {}
+
+    @Override
+    public CompletableFuture<UserStats> loadStats(UUID uuid) {
+        return CompletableFuture.completedFuture(new UserStats(uuid, 0, 0, 0, 0, 0.0));
     }
 
-    public void addMember(UUID uuid) {
-        if (!members.contains(uuid)) members.add(uuid);
+    @Override
+    public void close() {}
+}
+--- FILE: src/main/java/org/antix/duelsparty/database/DatabaseService.java ---
+package org.antix.duelsparty.database;
+
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
+public interface DatabaseService {
+    void saveMatchResult(UUID winner, UUID loser, int winnerKills, int loserKills);
+    CompletableFuture<UserStats> loadStats(UUID uuid);
+    void close();
+}
+--- FILE: src/main/java/org/antix/duelsparty/database/MySQLDatabase.java ---
+package org.antix.duelsparty.database;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.antix.duelsparty.DuelsPartyPlugin;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
+public class MySQLDatabase implements DatabaseService {
+    private final HikariDataSource dataSource;
+
+    public MySQLDatabase(String host, int port, String database, String user, String password) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + database);
+        config.setUsername(user);
+        config.setPassword(password);
+
+        // Optymalizacja pod Minecrafta
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "250");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
+        config.setMaximumPoolSize(10); // Wystarczające dla trybu Lobby
+
+        this.dataSource = new HikariDataSource(config);
+        createTables();
     }
 
-    public void removeMember(UUID uuid) {
-        members.remove(uuid);
+    private void createTables() {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "CREATE TABLE IF NOT EXISTS produels_stats (" +
+                             "uuid VARCHAR(36) PRIMARY KEY, " +
+                             "wins INT DEFAULT 0, " +
+                             "losses INT DEFAULT 0, " +
+                             "kills INT DEFAULT 0, " +
+                             "deaths INT DEFAULT 0" +
+                             ")")) {
+            stmt.execute();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void saveMatchResult(UUID winner, UUID loser, int winnerKills, int loserKills) {
+        // Wykonujemy to asynchronicznie, aby nie blokować Main Thread
+        CompletableFuture.runAsync(() -> {
+            try (Connection conn = dataSource.getConnection()) {
+                updatePlayer(conn, winner, true, winnerKills, 0);
+                updatePlayer(conn, loser, false, loserKills, 1);
+                DuelsPartyPlugin.debug("Zapisano wynik walki w MySQL dla: " + winner + " i " + loser);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private void updatePlayer(Connection conn, UUID uuid, boolean won, int kills, int deaths) throws SQLException {
+        String sql = "INSERT INTO produels_stats (uuid, wins, losses, kills, deaths) VALUES (?, ?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE wins = wins + ?, losses = losses + ?, kills = kills + ?, deaths = deaths + ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, uuid.toString());
+            stmt.setInt(2, won ? 1 : 0);
+            stmt.setInt(3, won ? 0 : 1);
+            stmt.setInt(4, kills);
+            stmt.setInt(5, deaths);
+            // Update part
+            stmt.setInt(6, won ? 1 : 0);
+            stmt.setInt(7, won ? 0 : 1);
+            stmt.setInt(8, kills);
+            stmt.setInt(9, deaths);
+            stmt.executeUpdate();
+        }
+    }
+
+    @Override
+    public CompletableFuture<UserStats> loadStats(UUID uuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            // Logika SELECT...
+            return new UserStats(uuid, 0, 0, 0, 0, 0.0);
+        });
+    }
+
+    @Override
+    public void close() {
+        if (dataSource != null) dataSource.close();
     }
 }
---- FILE: src/main/java/org/antix/duelsparty/party/PartyManager.java ---
-package org.antix.duelsparty.party;
+--- FILE: src/main/java/org/antix/duelsparty/database/UserStats.java ---
+package org.antix.duelsparty.database;
 
-import org.bukkit.entity.Player;
-import java.util.*;
+import java.util.UUID;
 
-public class PartyManager {
-    private final Map<UUID, Party> playerPartyMap = new HashMap<>();
+public record UserStats(
+        UUID uuid,
+        int wins,
+        int losses,
+        int kills,
+        int deaths,
+        double accuracy
+) {}
+--- FILE: src/main/java/org/antix/duelsparty/DuelsPartyPlugin.java ---
+package org.antix.duelsparty;
 
-    public Party createParty(Player leader) {
-        Party party = new Party(leader.getUniqueId(), new ArrayList<>(Collections.singletonList(leader.getUniqueId())));
-        playerPartyMap.put(leader.getUniqueId(), party);
-        return party;
-    }
 
-    public Optional<Party> getParty(Player player) {
-        return Optional.ofNullable(playerPartyMap.get(player.getUniqueId()));
-    }
+import org.antix.duelsparty.command.*;
+import org.antix.duelsparty.database.DatabaseService;
+import org.antix.duelsparty.database.MySQLDatabase;
+import org.antix.duelsparty.database.NullDatabase;
+import org.antix.duelsparty.duel.kit.KitManager;
+import org.antix.duelsparty.party.PartyManager;
+import org.antix.duelsparty.duel.DuelListener;
+import org.antix.duelsparty.duel.DuelManager;
+import org.antix.duelsparty.util.MessageService;
+import org.bukkit.command.PluginCommand;
+import org.bukkit.plugin.java.JavaPlugin;
 
-    public void joinParty(Player player, Party party) {
-        party.addMember(player.getUniqueId());
-        playerPartyMap.put(player.getUniqueId(), party);
-    }
+public final class DuelsPartyPlugin extends JavaPlugin {
 
-    public void leaveParty(Player player) {
-        Party party = playerPartyMap.remove(player.getUniqueId());
-        if (party != null) {
-            party.removeMember(player.getUniqueId());
-            // Jeśli lider wychodzi, rozwiązujemy grupę (uproszczenie)
-            if (party.isLeader(player.getUniqueId())) {
-                party.members().forEach(playerPartyMap::remove);
-            }
+    private DuelManager duelManager;
+    private KitManager kitManager;
+    private MessageService messageService;
+    private final PartyManager partyManager = new PartyManager();
+    private static DuelsPartyPlugin instance;
+    private DatabaseService databaseService;
+
+    @Override
+    public void onEnable() {
+        // 1. Najpierw KitManager
+        this.kitManager = new KitManager(this);
+        this.kitManager.loadKits();
+
+        PluginCommand duelCmd = getCommand("duel");
+        if (duelCmd != null) {
+            duelCmd.setTabCompleter(new DuelTabCompleter());
         }
+
+// 2. Potem DuelManager z wstrzykniętym kitManagerem
+        this.duelManager = new DuelManager(kitManager);
+        instance = this;
+        saveDefaultConfig();
+// 2. Zainicjalizuj tutaj, przekazując "this" jako JavaPlugin
+        this.messageService = new MessageService(this);
+
+        saveDefaultConfig();
+        duelManager.loadArenas(getConfig());
+
+        // Ważne: najpierw inicjalizujemy messageService, potem rejestrujemy komendy,
+        // bo komendy go potrzebują!
+        registerCommands();
+
+        getServer().getPluginManager().registerEvents(new DuelListener(duelManager, messageService), this);
+        showWelcomeMessage();
+    }
+
+    @Override
+    public void onDisable() {
+        // Zapisywanie aren przy wyłączaniu
+        getLogger().info("Zapisywanie aren...");
+        duelManager.saveArenas(getConfig());
+        saveConfig();
+    }
+
+    private void registerCommands() {
+
+        // Rejestracja /duel
+        DuelInviteCommand duelInvite = new DuelInviteCommand(duelManager, messageService);
+        registerCommand("duel", duelInvite);
+        getCommand("duel").setTabCompleter(new DuelTabCompleter());
+
+        // Rejestracja /dueladmin
+        ArenaAdminCommand arenaAdmin = new ArenaAdminCommand(duelManager);
+        registerCommand("dueladmin", arenaAdmin);
+        getCommand("dueladmin").setTabCompleter(new ArenaAdminTabCompleter());
+
+        // Wszystkie komendy teraz używają tej samej, bezpiecznej metody
+        registerCommand("duel", new DuelInviteCommand(duelManager, messageService));
+        registerCommand("accept", new DuelAcceptCommand(duelManager, messageService));
+        registerCommand("dueladmin", new ArenaAdminCommand(duelManager));
+        registerCommand("duelstats", new DuelStatsCommand(messageService));
+
+    }
+
+    private void registerCommand(String name, org.bukkit.command.CommandExecutor executor) {
+        PluginCommand command = getCommand(name);
+        if (command != null) {
+            command.setExecutor(executor);
+        } else {
+            // Twoja metoda pomocnicza teraz pilnuje porządku dla KAŻDEJ komendy
+            getLogger().severe("Błąd! Komenda /" + name + " nie została znaleziona w plugin.yml!");
+        }
+    }
+
+    private void showWelcomeMessage() {
+        getLogger().info("================================");
+        getLogger().info(" DuelsParty Plugin Enabled! ");
+        getLogger().info(" Autor: Antix ");
+        getLogger().info("================================");
+    }
+    public static void debug(String message) {
+        if (instance != null && instance.getConfig().getBoolean("debug", false)) {
+            instance.getLogger().info("[DEBUG] " + message);
+        }
+    }
+    // Metoda statyczna, której szuka IDE
+    public static DuelsPartyPlugin getInstance() {
+        return instance;
+    }
+    public DuelManager getDuelManager() { return duelManager; }
+    public MessageService getMessageService() { return messageService; }
+    public KitManager getKitManager(){return kitManager;}
+
+    private void setupDatabase() {
+        if (getConfig().getBoolean("mysql.enabled", false)) {
+            this.databaseService = new MySQLDatabase(
+                    getConfig().getString("mysql.host"),
+                    getConfig().getInt("mysql.port"),
+                    getConfig().getString("mysql.database"),
+                    getConfig().getString("mysql.user"),
+                    getConfig().getString("mysql.password")
+            );
+            getLogger().info("System bazy danych MySQL został uruchomiony.");
+        } else {
+            this.databaseService = new NullDatabase();
+            getLogger().info("Baza danych jest wyłączona. Statystyki nie będą zapisywane.");
+        }
+    }
+}
+--- FILE: src/main/java/org/antix/duelsparty/util/ArenaLocation.java ---
+package org.antix.duelsparty.util;
+
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.World;
+
+public record ArenaLocation(String worldName, double x, double y, double z, float yaw, float pitch) {
+
+    public static ArenaLocation fromLocation(Location loc) {
+        return new ArenaLocation(
+                loc.getWorld().getName(),
+                loc.getX(),
+                loc.getY(),
+                loc.getZ(),
+                loc.getYaw(),
+                loc.getPitch()
+        );
+    }
+
+    public Location toLocation() {
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) return null;
+        return new Location(world, x, y, z, yaw, pitch);
+    }
+
+    public String serialize() {
+        // Używamy Locale.US, aby wymusić kropkę jako separator dziesiętny niezależnie od kraju
+        return String.format(java.util.Locale.US, "%s;%f;%f;%f;%f;%f", worldName, x, y, z, yaw, pitch);
+    }
+
+    public static ArenaLocation deserialize(String s) {
+        if (s == null || s.isEmpty()) return null;
+        String[] parts = s.replace(',', '.').split(";");
+        return new ArenaLocation(
+                parts[0],
+                Double.parseDouble(parts[1]),
+                Double.parseDouble(parts[2]),
+                Double.parseDouble(parts[3]),
+                Float.parseFloat(parts[4]),
+                Float.parseFloat(parts[5])
+        );
     }
 }
 --- FILE: src/main/java/org/antix/duelsparty/util/MessageService.java ---
@@ -1114,74 +1395,61 @@ public class MessageService {
         return ChatColor.translateAlternateColorCodes('&', message);
     }
 }
---- FILE: src/main/java/org/antix/duelsparty/util/ArenaLocation.java ---
-package org.antix.duelsparty.util;
+--- FILE: src/main/java/org/antix/duelsparty/party/PartyManager.java ---
+package org.antix.duelsparty.party;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.World;
+import org.bukkit.entity.Player;
+import java.util.*;
 
-public record ArenaLocation(String worldName, double x, double y, double z, float yaw, float pitch) {
+public class PartyManager {
+    private final Map<UUID, Party> playerPartyMap = new HashMap<>();
 
-    public static ArenaLocation fromLocation(Location loc) {
-        return new ArenaLocation(
-                loc.getWorld().getName(),
-                loc.getX(),
-                loc.getY(),
-                loc.getZ(),
-                loc.getYaw(),
-                loc.getPitch()
-        );
+    public Party createParty(Player leader) {
+        Party party = new Party(leader.getUniqueId(), new ArrayList<>(Collections.singletonList(leader.getUniqueId())));
+        playerPartyMap.put(leader.getUniqueId(), party);
+        return party;
     }
 
-    public Location toLocation() {
-        World world = Bukkit.getWorld(worldName);
-        if (world == null) return null;
-        return new Location(world, x, y, z, yaw, pitch);
+    public Optional<Party> getParty(Player player) {
+        return Optional.ofNullable(playerPartyMap.get(player.getUniqueId()));
     }
 
-    public String serialize() {
-        // Używamy Locale.US, aby wymusić kropkę jako separator dziesiętny niezależnie od kraju
-        return String.format(java.util.Locale.US, "%s;%f;%f;%f;%f;%f", worldName, x, y, z, yaw, pitch);
+    public void joinParty(Player player, Party party) {
+        party.addMember(player.getUniqueId());
+        playerPartyMap.put(player.getUniqueId(), party);
     }
 
-    public static ArenaLocation deserialize(String s) {
-        if (s == null || s.isEmpty()) return null;
-        String[] parts = s.replace(',', '.').split(";");
-        return new ArenaLocation(
-                parts[0],
-                Double.parseDouble(parts[1]),
-                Double.parseDouble(parts[2]),
-                Double.parseDouble(parts[3]),
-                Float.parseFloat(parts[4]),
-                Float.parseFloat(parts[5])
-        );
+    public void leaveParty(Player player) {
+        Party party = playerPartyMap.remove(player.getUniqueId());
+        if (party != null) {
+            party.removeMember(player.getUniqueId());
+            // Jeśli lider wychodzi, rozwiązujemy grupę (uproszczenie)
+            if (party.isLeader(player.getUniqueId())) {
+                party.members().forEach(playerPartyMap::remove);
+            }
+        }
     }
 }
---- FILE: src/main/resources/plugin.yml ---
-name: DuelsParty
-version: 1.0
-main: org.antix.duelsparty.DuelsPartyPlugin
-api-version: '1.21' # Warto trzymać w cudzysłowie dla świętego spokoju
-author: Antix
+--- FILE: src/main/java/org/antix/duelsparty/party/Party.java ---
+package org.antix.duelsparty.party;
 
-commands:
-  duel:
-    description: Send a duel invite to a player.
-    usage: /duel <player>
-    permission: duelsparty.duel # Dobra praktyka: dodaj uprawnienia od razu
-  accept:
-    description: "Accept a pending duel invite."
-    usage: /accept
-    permission: duelsparty.accept
-  dueladmin:
-    description: "Zarządzanie arenami"
-    aliases: [da]
-    permission: duelsparty.admin
-  duelstats:
-    description: "Sprawdź swoje statystyki"
-    aliases: [ stats, statystyki ]
-    permission: duelsparty.stats
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+public record Party(UUID leader, List<UUID> members) {
+    public boolean isLeader(UUID uuid) {
+        return leader.equals(uuid);
+    }
+
+    public void addMember(UUID uuid) {
+        if (!members.contains(uuid)) members.add(uuid);
+    }
+
+    public void removeMember(UUID uuid) {
+        members.remove(uuid);
+    }
+}
 --- FILE: src/main/resources/messages_pl.yml ---
 messages:
   error.usage-duel: "&6&l» &cPoprawne użycie: &f/duel <gracz>"
@@ -1210,6 +1478,30 @@ messages:
   duel.death.18: "&6&l» &7Nie płacz &f{victim}&7, &f{killer} &7po prostu zjadł dziś lepsze śniadanie."
   duel.death.19: "&6&l» &f{victim} &7został zmieciony z planszy. Pogromca: &f{killer}&7."
   duel.death.20: "&6&l» &7Legenda głosi, że &f{victim} &7do teraz szuka swoich itemów. &f{killer} &7GG!"
+--- FILE: src/main/resources/plugin.yml ---
+name: DuelsParty
+version: 1.0
+main: org.antix.duelsparty.DuelsPartyPlugin
+api-version: '1.21' # Warto trzymać w cudzysłowie dla świętego spokoju
+author: Antix
+
+commands:
+  duel:
+    description: Send a duel invite to a player.
+    usage: /duel <player>
+    permission: duelsparty.duel # Dobra praktyka: dodaj uprawnienia od razu
+  accept:
+    description: "Accept a pending duel invite."
+    usage: /accept
+    permission: duelsparty.accept
+  dueladmin:
+    description: "Zarządzanie arenami"
+    aliases: [da]
+    permission: duelsparty.admin
+  duelstats:
+    description: "Sprawdź swoje statystyki"
+    aliases: [ stats, statystyki ]
+    permission: duelsparty.stats
 --- FILE: src/main/resources/config.yml ---
 debug: true
 --- FILE: src/main/resources/messages_en.yml ---

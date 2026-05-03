@@ -4,8 +4,14 @@ import org.antix.duelsparty.DuelException;
 import org.antix.duelsparty.DuelsPartyPlugin;
 import org.antix.duelsparty.duel.arena.Arena;
 import org.antix.duelsparty.duel.kit.Kit;
-import org.antix.duelsparty.duel.kit.KitManager; // Import managera kitów
+import org.antix.duelsparty.duel.kit.KitManager;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+import org.antix.duelsparty.party.Party;
 import org.antix.duelsparty.util.ArenaLocation;
+import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
@@ -17,8 +23,12 @@ public class DuelManager {
     private final List<Arena> arenas = new ArrayList<>();
     private final Map<UUID, InviteContext> pendingInvites = new HashMap<>();
     private final List<Duel> activeDuels = new ArrayList<>();
+    private final Map<UUID, UUID> partyDuelInvites = new ConcurrentHashMap<>();
+    private final Map<UUID, InviteContext> partyInviteContexts = new ConcurrentHashMap<>();
 
-    // 2. Poprawiamy konstruktor - iniekcja zależności
+
+
+
     public DuelManager(KitManager kitManager) {
         this.kitManager = kitManager;
     }
@@ -61,7 +71,31 @@ public class DuelManager {
         DuelsPartyPlugin.debug("Pojedynek stworzony. Arena: " + arena.getName() + ", Kit: " + selectedKit.id());
         return duel;
     }
+    /**
+     * Inicjuje pojedynek między dwoma grupami (Party vs Party).
+     */
+    public Duel createPartyDuel(Party partyA, Party partyB, Arena requestedArena, String kitId) {
+        DuelsPartyPlugin.debug("Inicjacja Party Duel: Lider " + partyA.getLeader() + " vs Lider " + partyB.getLeader());
 
+        // Konwersja UUID na obiekty Player (tylko gracze online)
+        List<Player> teamA = partyA.getMembers().stream()
+                .map(Bukkit::getPlayer)
+                .filter(Objects::nonNull) // Wymaga importu java.util.Objects
+                .collect(Collectors.toList());
+
+        List<Player> teamB = partyB.getMembers().stream()
+                .map(Bukkit::getPlayer)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        // Walidacja - czy liderzy nie są sami w zespole lub czy nikt nie uciekł
+        if (teamA.isEmpty() || teamB.isEmpty()) {
+            throw new DuelException("error.party-member-offline");
+        }
+
+        // Wywołujemy główną logikę tworzenia pojedynku
+        return createDuel(teamA, teamB, requestedArena, kitId);
+    }
     /**
      * Poprawione przeciążenie dla 1v1 - używa domyślnego kitu
      */
@@ -155,5 +189,82 @@ public class DuelManager {
 
     public void removeArena(String name) {
         arenas.removeIf(arena -> arena.getName().equalsIgnoreCase(name));
+    }
+    public void sendPartyInvite(Player sender, Player target, Arena arena, String kitId) {
+        UUID senderUuid = sender.getUniqueId();
+        UUID targetUuid = target.getUniqueId();
+
+        // 1. Walidacja stanu liderów i ich party
+        Party senderParty = DuelsPartyPlugin.getInstance().getPartyManager().getParty(sender)
+                .orElseThrow(() -> new DuelException("error.not-in-party"));
+
+        Party targetParty = DuelsPartyPlugin.getInstance().getPartyManager().getParty(target)
+                .orElseThrow(() -> new DuelException("error.target-not-in-party"));
+
+        if (!senderParty.isLeader(senderUuid)) throw new DuelException("error.not-party-leader");
+        if (!targetParty.isLeader(targetUuid)) throw new DuelException("error.target-not-party-leader");
+
+        // 2. Sprawdzenie czy członkowie są gotowi (nie są w innej walce)
+        validatePartyReadiness(senderParty);
+        validatePartyReadiness(targetParty);
+
+        // 3. Zapisanie zaproszenia
+
+        partyDuelInvites.put(targetUuid, senderUuid);
+        partyInviteContexts.put(targetUuid, new InviteContext(
+                senderUuid,
+                arena,
+                kitId,
+                System.currentTimeMillis()
+        ));
+
+        DuelsPartyPlugin.debug("Wysłano wyzwanie Party: " + senderParty.getName() + " vs " + targetParty.getName());
+    }
+
+    private void validatePartyReadiness(Party party) {
+        for (UUID memberUuid : party.getMembers()) {
+            Player member = Bukkit.getPlayer(memberUuid);
+            if (member == null || !member.isOnline()) throw new DuelException("error.party-member-offline");
+            if (getDuelByPlayer(member).isPresent()) throw new DuelException("error.party-member-in-fight");
+        }
+    }
+    /**
+     * Sprawdza, czy lider posiada aktywne zaproszenie do walki grupowej.
+     */
+    public boolean hasPartyInvite(UUID targetUuid) {
+        return partyDuelInvites.containsKey(targetUuid);
+    }
+
+    /**
+     * Pobiera UUID lidera, który wysłał zaproszenie.
+     */
+    public UUID getPartyInviteSender(UUID targetUuid) {
+        return partyDuelInvites.get(targetUuid);
+    }
+
+    /**
+     * Pobiera kontekst walki (arena, kit) dla zaproszenia grupowego.
+     */
+    public InviteContext getPartyInviteContext(UUID targetUuid) {
+        return partyInviteContexts.get(targetUuid);
+    }
+
+// --- Sekcja Zarządzania Zaproszeniami ---
+
+    /**
+     * Czyści zaproszenie 1v1 dla danego gracza.
+     * @param targetUuid UUID gracza, który otrzymał zaproszenie.
+     */
+    public void clearInvite(UUID targetUuid) {
+        pendingInvites.remove(targetUuid);
+    }
+
+    /**
+     * Czyści zaproszenie Party vs Party dla lidera grupy.
+     * @param targetLeaderUuid UUID lidera, który otrzymał wyzwanie.
+     */
+    public void clearPartyInvite(UUID targetLeaderUuid) {
+        partyDuelInvites.remove(targetLeaderUuid);
+        partyInviteContexts.remove(targetLeaderUuid);
     }
 }

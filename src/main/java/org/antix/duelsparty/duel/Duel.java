@@ -1,6 +1,7 @@
 package org.antix.duelsparty.duel;
 
 import org.antix.duelsparty.DuelsPartyPlugin;
+import org.antix.duelsparty.database.DatabaseService;
 import org.antix.duelsparty.duel.arena.Arena;
 import org.antix.duelsparty.duel.kit.Kit;
 import org.antix.duelsparty.duel.match.MatchPlayerData;
@@ -82,6 +83,31 @@ public class Duel {
     public void end(Player winner) {
         this.state = MatchState.ENDING;
 
+        // 1. Wyznaczenie przegranego (dla systemu 1v1)
+        Player loser = null;
+        if (winner != null) {
+            loser = getAllParticipants().stream()
+                    .filter(p -> !p.equals(winner))
+                    .findFirst().orElse(null);
+        }
+
+        // 2. Pobranie instancji bazy danych
+        DatabaseService db = DuelsPartyPlugin.getInstance().getDatabaseService();
+
+        // 3. Asynchroniczny zapis wyniku, jeśli mamy zwycięzcę
+        if (winner != null && loser != null && db != null) {
+            MatchPlayerData winnerData = matchData.get(winner.getUniqueId());
+            MatchPlayerData loserData = matchData.get(loser.getUniqueId());
+
+            // Przekazujemy UUID oraz zabójstwa zebrane podczas walki
+            db.saveMatchResult(
+                    winner.getUniqueId(),
+                    loser.getUniqueId(),
+                    winnerData.getKills(),
+                    loserData.getKills()
+            );
+        }
+
         getAllParticipants().forEach(p -> {
             String lang = p.getLocale().split("_")[0].toLowerCase();
 
@@ -106,7 +132,7 @@ public class Duel {
         DuelsPartyPlugin.debug("Duel ended. Arena " + arena.getName() + " is now free.");
     }
 
-    // --- Reszta metod (getAllParticipants, containsPlayer, gettery) bez zmian ---
+
     public List<Player> getAllParticipants() {
         List<UUID> allUuids = new ArrayList<>(teamA);
         allUuids.addAll(teamB);

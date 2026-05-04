@@ -30,9 +30,10 @@ public class SubAdminArena implements SubCommand {
     @Override
     public void execute(Player player, String[] args, String lang) {
         if (args.length < 2) {
-            player.sendMessage("§6§l» §cPoprawne użycie: §f/da arena <set1|set2|delete|tp> [nazwa]");
+            player.sendMessage(messageService.getMessage(lang, "usage-arena"));
             return;
         }
+
 
         String action = args[1].toLowerCase();
         UUID uuid = player.getUniqueId();
@@ -40,24 +41,24 @@ public class SubAdminArena implements SubCommand {
         switch (action) {
             case "set1" -> {
                 pendingSpawn1.put(uuid, ArenaLocation.fromLocation(player.getLocation()));
-                player.sendMessage("§6§l» §aSpawn 1 zapisany w pamięci. Teraz przejdź na drugą stronę i wpisz §f/da arena set2 <nazwa>§a.");
+                player.sendMessage(messageService.getMessage(lang, "spawn-saved"));
             }
-            case "set2" -> handleSet2(player, args);
-            case "delete" -> handleDelete(player, args);
-            case "tp" -> handleTeleport(player, args);
-            default -> player.sendMessage("§6§l» §cNieznana akcja areny.");
+            case "set2" -> handleSet2(player, args,lang);
+            case "delete" -> handleDelete(player, args,lang);
+            case "tp" -> handleTeleport(player, args,lang);
+            default -> player.sendMessage(messageService.getMessage(lang, "unknown-arena-action"));
         }
     }
 
-    private void handleSet2(Player player, String[] args) {
+    private void handleSet2(Player player, String[] args, String lang) {
         if (args.length < 3) {
-            player.sendMessage("§6§l» §cMusisz podać nazwę areny: /da arena set2 <nazwa>");
+            player.sendMessage(messageService.getMessage(lang,"arena-not-defined"));
             return;
         }
 
         ArenaLocation s1 = pendingSpawn1.remove(player.getUniqueId());
         if (s1 == null) {
-            player.sendMessage("§6§l» §cNajpierw ustaw spawn 1!");
+            player.sendMessage(messageService.getMessage(lang,"missing-spawn-1"));
             return;
         }
 
@@ -66,24 +67,26 @@ public class SubAdminArena implements SubCommand {
         Arena newArena = new Arena(name, s1, s2);
 
         duelManager.addArena(newArena);
-        saveAsync(player, "§aPomyślnie utworzono arenę: §f" + name);
+
+
+        saveAsync(player, messageService.getMessage(lang,"arena-created") + name);
     }
 
-    private void handleDelete(Player player, String[] args) {
+    private void handleDelete(Player player, String[] args, String lang) {
         if (args.length < 3) {
-            player.sendMessage("§6§l» §cPodaj nazwę areny do usunięcia.");
+            player.sendMessage(messageService.getMessage(lang,"arena-not-defined"));
             return;
         }
         String name = args[2];
         duelManager.removeArena(name);
-        saveAsync(player, "§cUsunięto arenę: §f" + name);
+        saveAsync(player,messageService.getMessage(lang,"arena-deleted") + name);
     }
 
-    private void handleTeleport(Player player, String[] args) {
+    private void handleTeleport(Player player, String[] args, String lang) {
         if (args.length < 3) return;
         duelManager.getArenaByName(args[2]).ifPresentOrElse(
                 arena -> player.teleport(arena.spawn1().toLocation()),
-        () -> player.sendMessage("§6§l» §cArena nie istnieje.")
+        () -> player.sendMessage(messageService.getMessage(lang,"arena-not-exists"))
         );
     }
 

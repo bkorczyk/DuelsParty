@@ -25,6 +25,7 @@ public class DuelManager {
     private final List<Duel> activeDuels = new ArrayList<>();
     private final Map<UUID, UUID> partyDuelInvites = new ConcurrentHashMap<>();
     private final Map<UUID, InviteContext> partyInviteContexts = new ConcurrentHashMap<>();
+    private final Map<String, UUID> publicQueue = new ConcurrentHashMap<>();
 
 
 
@@ -266,5 +267,50 @@ public class DuelManager {
     public void clearPartyInvite(UUID targetLeaderUuid) {
         partyDuelInvites.remove(targetLeaderUuid);
         partyInviteContexts.remove(targetLeaderUuid);
+    }
+
+    public void toggleQueue(Player player, String kitId) {
+        UUID uuid = player.getUniqueId();
+
+        // 1. Sprawdzamy, czy gracz już nie jest w walce
+        if (getDuelByPlayer(player).isPresent()) {
+            player.sendMessage("§c§l» §cNie możesz dołączyć do kolejki podczas walki!");
+            return;
+        }
+
+        // 2. Sprawdzamy, czy ktoś już czeka na ten sam Kit
+        UUID waitingPlayerUuid = publicQueue.get(kitId);
+
+        if (waitingPlayerUuid != null && !waitingPlayerUuid.equals(uuid)) {
+            Player opponent = Bukkit.getPlayer(waitingPlayerUuid);
+
+            // Sprawdzamy czy przeciwnik nadal jest online i dostępny
+            if (opponent != null && opponent.isOnline() && getDuelByPlayer(opponent).isEmpty()) {
+                publicQueue.remove(kitId); // Usuwamy go z kolejki
+
+                player.sendMessage("§6§l» §aZnaleziono przeciwnika! Start walki...");
+                opponent.sendMessage("§6§l» §aZnaleziono przeciwnika! Start walki...");
+
+                // Tworzymy pojedynek (Twoja istniejąca metoda!)
+                createDuel(List.of(player), List.of(opponent), null, kitId).start();
+                return;
+            } else {
+                publicQueue.remove(kitId); // Przeciwnik wyszedł, czyścimy miejsce
+            }
+        }
+
+        // 3. Jeśli nikt nie czeka - dodajemy gracza do kolejki lub go z niej wyjmujemy
+        if (publicQueue.containsValue(uuid)) {
+            publicQueue.values().remove(uuid);
+            player.sendMessage("§6§l» §cOpuszczono kolejkę " + kitId);
+        } else {
+            publicQueue.put(kitId, uuid);
+            player.sendMessage("§6§l» §aDołączono do kolejki: §f" + kitId + "§a. Czekanie na przeciwnika...");
+        }
+    }
+    public void removeFromAllQueues(UUID uuid) {
+        // Usuwamy gracza ze wszystkich trybów, w których mógłby wisieć
+        publicQueue.values().removeIf(id -> id.equals(uuid));
+        DuelsPartyPlugin.debug("Usunięto gracza z kolejek publicznych (Quit).");
     }
 }

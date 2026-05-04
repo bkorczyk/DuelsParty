@@ -73,4 +73,12 @@ public class KitManager {
     public Set<String> getKitNames() {
         return kits.keySet();
     }
+    /**
+     * Zwraca wszystkie załadowane zestawy (Kity).
+     * Używane m.in. przez GUI wyboru zestawu.
+     */
+    public Collection<Kit> getKits() {
+        return Collections.unmodifiableCollection(kits.values());
+    }
+
 }

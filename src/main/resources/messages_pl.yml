@@ -1,3 +1,29 @@
+# Przykład dla messages_pl.yml
+gui:
+  queue-title: "&8Kolejka Matchmaking"
+  kit-title: "&8Wybierz Kit"
+  mode-prefix: "&6&lTryb: &e"
+  kit-prefix: "&6&lKit: &e"
+  click-to-search: "&7Kliknij, aby szukać przeciwnika"
+  click-to-challenge: "&7Kliknij, aby wyzwać gracza"
+
+admin:
+  usage-arena: "&6&l» &cPoprawne użycie: &f/da arena <set1|set2|delete|tp> [nazwa]"
+  spawn-saved: "&6&l» &aSpawn {id} zapisany. Wpisz /da arena set2 <nazwa>."
+  arena-created: "&6&l» &aPomyślnie utworzono arenę: &f{name}"
+  arena-deleted: "&6&l» &aPomyślnie usunięto arenę: &f{name}"
+  arena-not-exists: "&6&l» &aArena nie istnieje: &f{name}"
+  kit-saved: "&6&l» &aKit &f{name} &azostał zapisany."
+  unknown-arena-action: "&6&l» &cNieznana akcja areny"
+  arena-not-defined: "§6§l» §cMusisz podać nazwę areny"
+  missing-spawn-1: "§6§l» §cNajpierw ustaw spawn 1!"
+
+duel:
+  countdown: "&6&l» &eStart za &f{sec}&e..."
+  start: "&6§l» &a&lWALKA!"
+  winner-title: "&a&lKoniec"
+  winner-subtitle: "&f{winner} wygrywa!"
+
 messages:
   error.usage-duel: "&6&l» &cPoprawne użycie: &f/duel <gracz>"
   error.player-offline: "&6&l» &cTen gracz jest offline."

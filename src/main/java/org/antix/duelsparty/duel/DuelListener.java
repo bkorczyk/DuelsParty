@@ -4,6 +4,7 @@ import org.antix.duelsparty.DuelsPartyPlugin;
 import org.antix.duelsparty.command.DuelAdminCommand;
 import org.antix.duelsparty.duel.match.MatchState;
 import org.antix.duelsparty.util.MessageService;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -33,27 +34,33 @@ public class DuelListener implements Listener {
         Player victim = event.getEntity();
 
         duelManager.getDuelByPlayer(victim).ifPresent(duel -> {
+            // Podstawowa obsługa eventu
             event.getDrops().clear();
             event.setDeathMessage(null);
 
             Player killer = victim.getKiller();
 
-            // 1. Wysyłanie spersonalizowanych komunikatów o śmierci
+            // 1. Komunikaty i efekty (robimy to od razu)
             broadcastDeathMessage(duel, victim, killer);
-
-            // 2. Efekt wizualny (piorun w miejscu śmierci - nie zadaje obrażeń)
             victim.getWorld().strikeLightningEffect(victim.getLocation());
 
-            // 3. Natychmiastowy respawn i zakończenie walki
-            victim.spigot().respawn();
-
-            // W systemie 1v1 zwycięzcą jest ten, kto nie zginął.
-            // W systemie Party/2v2 będziesz musiał sprawdzić czy cała lista teamu padła.
+            // 2. Wyznaczenie zwycięzcy (logika przed zamknięciem pojedynku)
             Player winner = killer != null ? killer : (duel.getAllParticipants().get(0).equals(victim)
                     ? duel.getAllParticipants().get(1) : duel.getAllParticipants().get(0));
 
-            duel.end(winner);
-            duelManager.removeDuel(duel);
+            // 3. Natychmiastowy respawn
+            // To wysyła do klienta pakiet o odrodzeniu
+            victim.spigot().respawn();
+
+            // 4. OPÓŹNIONA FINALIZACJA (1 tick = 0.05s)
+            // Dajemy serwerowi czas na przetworzenie respawnu, zanim go przeteleportujemy "do domu"
+            Bukkit.getScheduler().runTaskLater(DuelsPartyPlugin.getInstance(), () -> {
+                // Sprawdzamy, czy gracz nadal jest online, żeby uniknąć błędu
+                if (victim.isOnline()) {
+                    duel.end(winner);
+                    duelManager.removeDuel(duel);
+                }
+            }, 1L); // 1 tick opóźnienia
         });
     }
 
@@ -135,6 +142,7 @@ public class DuelListener implements Listener {
         Player player = event.getPlayer();
         UUID uuid = player.getUniqueId();
 
+        duelManager.removeFromAllQueues(uuid);
         // 1. Obsługa Party - usunięcie gracza z grupy przy wyjściu (Safety First)
         DuelsPartyPlugin.getInstance().getPartyManager().leaveParty(player);
 
